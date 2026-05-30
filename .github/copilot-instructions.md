@@ -28,7 +28,7 @@ The system should behave like a structured analytical assistant for media intell
 
 Use only the following stack unless explicitly necessary:
 - Python 3.13.7
-- virtual environment (`venv`)
+- virtual environment (`venv`) (accessed for code execution via `.venv\Scripts\python`)
 - Streamlit for UI
 - LM Studio as the local model runtime
 - one chat/generation model: `gemma-4-e4b`

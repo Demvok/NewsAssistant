@@ -1,0 +1,46 @@
+# AI News Intelligence Assistant - Python Dependencies
+# Python 3.13.7 required
+
+# Web Framework & UI
+streamlit
+streamlit-option-menu
+
+# LLM & Embeddings
+openai
+langchain
+langchain-community
+langchain-core
+
+# Vector Database
+chromadb
+
+# Document Processing
+pypdf
+python-docx
+
+# Data & Processing
+pandas
+numpy
+pydantic
+
+# Configuration
+python-dotenv
+
+# Utilities
+requests
+aiohttp
+pydantic-settings
+
+# Logging & Monitoring
+python-json-logger
+
+# Optional: For plotting and visualization
+plotly
+matplotlib
+
+# Development (optional)
+pytest
+pytest-asyncio
+black
+flake8
+mypy
