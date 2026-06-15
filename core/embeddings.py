@@ -118,12 +118,29 @@ def embed_text(text: str, client: Optional[OpenAIEmbeddings] = None) -> List[flo
     if client is None:
         raise RuntimeError("Embeddings client not initialized. Call get_embeddings_client(base_url, model_name) first.")
 
-    # Ensure plain Python str
-    text = str(text)
+    # Normalize and detect token-id lists encoded as strings
+    import json
+
+    # If original input was a list/tuple of ints, convert to space-separated
+    if isinstance(text, (list, tuple)) and all(isinstance(x, int) for x in text):
+        coerced = " ".join(str(x) for x in text)
+    else:
+        t_str = str(text)
+        if t_str.strip().startswith("[") and t_str.strip().endswith("]"):
+            try:
+                parsed = json.loads(t_str)
+                if isinstance(parsed, (list, tuple)) and all(isinstance(x, int) for x in parsed):
+                    coerced = " ".join(str(x) for x in parsed)
+                else:
+                    coerced = t_str
+            except Exception:
+                coerced = t_str
+        else:
+            coerced = t_str
 
     try:
         # Use batch method for consistent payload shape
-        embeddings = client.embed_documents([text])
+        embeddings = client.embed_documents([coerced])
         if not embeddings or not isinstance(embeddings, list):
             raise RuntimeError("Invalid embedding response from OpenAIEmbeddings")
         return embeddings[0]
@@ -134,7 +151,7 @@ def embed_text(text: str, client: Optional[OpenAIEmbeddings] = None) -> List[flo
             {
                 "error": str(e),
                 "input_type": type(text).__name__,
-                "input_preview": repr(text)[:200],
+                "input_preview": repr(coerced)[:200],
             },
         )
         raise
