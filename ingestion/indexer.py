@@ -8,7 +8,6 @@ import logging
 from typing import Optional
 
 import chromadb
-from chromadb.config import Settings as ChromaSettings
 
 from core.embeddings import embed_batch, get_embeddings_client
 
@@ -41,13 +40,8 @@ def initialize_chroma_db(
         # Initialize embeddings client
         get_embeddings_client(embedding_base_url, embedding_model)
 
-        # Initialize ChromaDB client with persistent storage
-        settings = ChromaSettings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=db_path,
-            anonymized_telemetry=False,
-        )
-        _chroma_client = chromadb.Client(settings)
+        # Initialize ChromaDB client with persistent storage (new API)
+        _chroma_client = chromadb.PersistentClient(path=db_path)
 
         # Get or create collection
         _collection = _chroma_client.get_or_create_collection(
@@ -96,11 +90,8 @@ def index_chunks(
 
     try:
         # Extract texts for embedding
-        texts = [chunk["content"] for chunk in chunks]
-        chunk_ids = [chunk["id"] for chunk in chunks]
-
-        # Generate embeddings
-        embeddings = embed_batch(texts)
+        texts_raw = [chunk.get("content", "") for chunk in chunks]
+        chunk_ids = [chunk.get("id") for chunk in chunks]
 
         # Prepare metadata
         metadatas = []
@@ -113,12 +104,47 @@ def index_chunks(
             }
             metadatas.append(metadata)
 
+        # Sanitize texts and align with metadata/ids
+        valid_texts = []
+        valid_ids = []
+        valid_metadatas = []
+        for cid, text, md in zip(chunk_ids, texts_raw, metadatas):
+            if text is None:
+                logger.warning(f"Skipping chunk {cid}: content is None")
+                continue
+            if not isinstance(text, str):
+                text = str(text)
+            text = text.strip()
+            if not text:
+                logger.warning(f"Skipping chunk {cid}: empty after strip")
+                continue
+            valid_texts.append(text)
+            valid_ids.append(cid)
+            valid_metadatas.append(md)
+
+        if not valid_texts:
+            raise ValueError("No valid texts to embed")
+
+        # Debug: log types and sample of texts before embedding
+        try:
+            sample_types = [type(t).__name__ for t in valid_texts[:5]]
+            logger.info(f"Embedding input types: {sample_types}")
+            logger.info(f"Embedding sample text (truncated): {valid_texts[0][:200]!r}")
+            # Also print to stdout to ensure visibility in CLI
+            print("[DEBUG] Embedding input types:", sample_types)
+            print("[DEBUG] Embedding sample (truncated):", repr(valid_texts[0][:200]))
+        except Exception:
+            logger.info("Failed to log embedding sample")
+
+        # Generate embeddings for sanitized texts
+        embeddings = embed_batch(valid_texts)
+
         # Add to collection
         _collection.add(
-            ids=chunk_ids,
+            ids=valid_ids,
             embeddings=embeddings,
-            documents=texts,
-            metadatas=metadatas,
+            documents=valid_texts,
+            metadatas=valid_metadatas,
         )
 
         logger.info(f"Indexed {len(chunks)} chunks successfully")

@@ -51,6 +51,16 @@ if "index_built" not in st.session_state:
 if "search_results" not in st.session_state:
     st.session_state.search_results = []
 
+# Initialize ChromaDB connection
+try:
+    initialize_chroma_db(
+        db_path=settings.rag.chromadb.persist_directory,
+        embedding_base_url=settings.lm_studio.base_url,
+        embedding_model=settings.lm_studio.embedding_model,
+    )
+except Exception as e:
+    logger.warning(f"ChromaDB initialization warning: {str(e)}")
+
 
 def get_collection_documents() -> Dict[str, int]:
     """Get count of documents in the collection by type."""
@@ -179,9 +189,9 @@ def load_and_index_files(uploaded_files) -> Dict:
 
 
 # Main layout
-tab1, tab2, tab3 = st.tabs(["📤 Upload", "🔍 Search", "📊 Statistics"])
+tab_stats, tab_search, tab_upload = st.tabs(["📊 Statistics", "🔍 Search", "📤 Upload"])
 
-with tab1:
+with tab_upload:
     st.subheader("Upload Documents")
 
     col1, col2 = st.columns([2, 1])
@@ -274,7 +284,7 @@ with tab1:
                 logger.error(f"Index rebuild failed: {str(e)}")
 
 
-with tab2:
+with tab_search:
     st.subheader("Search Corpus")
 
     search_query = st.text_input(
@@ -295,7 +305,7 @@ with tab2:
         )
 
     with col2:
-        st.metric("", "Top-K", value=top_k)
+        st.metric("Top-K", top_k)
 
     if st.button("🔍 Search", key="search_btn"):
         if not search_query.strip():
@@ -357,7 +367,7 @@ with tab2:
                 )
 
 
-with tab3:
+with tab_stats:
     st.subheader("Corpus Statistics")
 
     try:
