@@ -60,7 +60,8 @@ def get_embeddings_client(base_url: str, model_name: str) -> OpenAIEmbeddings:
 def embed_text(text: str, client: Optional[OpenAIEmbeddings] = None) -> List[float]:
     """Generate embedding for a given text using OpenAIEmbeddings.
 
-    Requires get_embeddings_client(...) to have been called beforehand (or pass client).
+    Uses embed_documents(...) consistently to avoid differences between
+    embed_query implementations across packages.
     """
     if not text or not text.strip():
         raise ValueError("Text cannot be empty")
@@ -71,21 +72,32 @@ def embed_text(text: str, client: Optional[OpenAIEmbeddings] = None) -> List[flo
     if client is None:
         raise RuntimeError("Embeddings client not initialized. Call get_embeddings_client(base_url, model_name) first.")
 
-    # Prefer embed_query method for single queries
-    if hasattr(client, "embed_query"):
-        return client.embed_query(text)
+    # Ensure plain Python str
+    text = str(text)
 
-    # Fallback to batch method and return first vector
-    if hasattr(client, "embed_documents"):
-        return client.embed_documents([text])[0]
+    try:
+        # Use batch method for consistent payload shape
+        embeddings = client.embed_documents([text])
+        if not embeddings or not isinstance(embeddings, list):
+            raise RuntimeError("Invalid embedding response from OpenAIEmbeddings")
+        return embeddings[0]
 
-    raise RuntimeError("OpenAIEmbeddings client does not expose known embed methods")
+    except Exception as e:
+        logger.error(
+            "Failed to embed text: %s",
+            {
+                "error": str(e),
+                "input_type": type(text).__name__,
+                "input_preview": repr(text)[:200],
+            },
+        )
+        raise
 
 
 def embed_batch(texts: List[str], client: Optional[OpenAIEmbeddings] = None) -> List[List[float]]:
     """Generate embeddings for a batch of texts using OpenAIEmbeddings.
 
-    Requires get_embeddings_client(...) to have been called beforehand (or pass client).
+    Uses embed_documents(...) and coerces inputs to plain strings.
     """
     if not texts:
         raise ValueError("Texts list cannot be empty")
@@ -96,10 +108,26 @@ def embed_batch(texts: List[str], client: Optional[OpenAIEmbeddings] = None) -> 
     if client is None:
         raise RuntimeError("Embeddings client not initialized. Call get_embeddings_client(base_url, model_name) first.")
 
-    if not hasattr(client, "embed_documents"):
-        raise RuntimeError("OpenAIEmbeddings client does not expose embed_documents")
+    # Coerce to plain strings and log sample types
+    coerced_texts = [str(t) for t in texts]
+    try:
+        embeddings = client.embed_documents(coerced_texts)
+        if not embeddings or not isinstance(embeddings, list):
+            raise RuntimeError("Invalid batch embedding response from OpenAIEmbeddings")
+        return embeddings
 
-    return client.embed_documents(texts)
+    except Exception as e:
+        sample_types = [type(t).__name__ for t in coerced_texts[:5]]
+        logger.error(
+            "Failed to embed batch: %s",
+            {
+                "error": str(e),
+                "num_texts": len(coerced_texts),
+                "sample_types": sample_types,
+                "sample_preview": repr(coerced_texts[0])[:200] if coerced_texts else "",
+            },
+        )
+        raise
 
 
 def reset_client() -> None:
