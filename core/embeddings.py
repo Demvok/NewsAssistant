@@ -16,9 +16,63 @@ except Exception as e:
     OpenAIEmbeddings = None  # type: ignore
     _import_error = e
 
+# Optional tokenizer support for detokenization
+_tokenizer = None
+_tokenizer_name: Optional[str] = None
+
 _embeddings_client: Optional[OpenAIEmbeddings] = None
 _embedding_base_url: Optional[str] = None
 _embedding_model: Optional[str] = None
+
+# Detokenization helper using optional HuggingFace tokenizer
+try:
+    from transformers import AutoTokenizer
+except Exception:
+    AutoTokenizer = None
+
+_tokenizer_cache = {}
+
+
+def _try_detokenize(token_ids: list, tokenizer_name: Optional[str] = None) -> Optional[str]:
+    """Attempt to detokenize a list of token IDs using a HuggingFace tokenizer.
+
+    Returns decoded string on success, or None if tokenizer is unavailable or decoding fails.
+    """
+    global _tokenizer_cache
+    # Prefer explicit tokenizer name, otherwise try to use embedding model name
+    name = tokenizer_name
+    if not name:
+        try:
+            from config import settings
+
+            name = settings.lm_studio.embedding_model
+        except Exception:
+            name = None
+
+    if AutoTokenizer is None or not name:
+        return None
+
+    # Cache tokenizer instances
+    if name not in _tokenizer_cache:
+        try:
+            _tokenizer_cache[name] = AutoTokenizer.from_pretrained(name, use_fast=False)
+        except Exception:
+            try:
+                # Fallback to a generic tokenizer (gpt2) if specific one is not available
+                _tokenizer_cache[name] = AutoTokenizer.from_pretrained("gpt2", use_fast=False)
+            except Exception:
+                _tokenizer_cache[name] = None
+
+    tokenizer = _tokenizer_cache.get(name)
+    if tokenizer is None:
+        return None
+
+    try:
+        # Ensure list of ints
+        ids = [int(x) for x in token_ids]
+        return tokenizer.decode(ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+    except Exception:
+        return None
 
 
 def get_embeddings_client(base_url: str, model_name: str) -> OpenAIEmbeddings:
