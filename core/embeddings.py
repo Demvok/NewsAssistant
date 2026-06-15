@@ -230,6 +230,9 @@ def embed_batch(texts: List[str], client: Optional[OpenAIEmbeddings] = None) -> 
 
     coerced_texts = []
     coerced_info = []
+    import json
+    from config import settings
+
     for t in texts:
         # If already a string, try to detect JSON-encoded list
         if isinstance(t, str):
@@ -239,7 +242,13 @@ def embed_batch(texts: List[str], client: Optional[OpenAIEmbeddings] = None) -> 
                 try:
                     parsed = json.loads(t_str)
                     if isinstance(parsed, (list, tuple)) and all(isinstance(x, int) for x in parsed):
-                        # Convert token id list to spaced numbers to avoid nested arrays
+                        # Attempt detokenization using tokenizer if available
+                        detok = _try_detokenize(parsed, settings.lm_studio.embedding_model)
+                        if detok is not None:
+                            coerced_texts.append(detok)
+                            coerced_info.append("detokenized_parsed_list")
+                            continue
+                        # Fallback: Convert token id list to spaced numbers
                         coerced = " ".join(str(x) for x in parsed)
                         coerced_texts.append(coerced)
                         coerced_info.append("parsed_list")
@@ -250,8 +259,13 @@ def embed_batch(texts: List[str], client: Optional[OpenAIEmbeddings] = None) -> 
             coerced_info.append("str")
             continue
 
-        # If it's a list/tuple of ints, join into space-separated string
+        # If it's a list/tuple of ints, try detokenization
         if isinstance(t, (list, tuple)) and all(isinstance(x, int) for x in t):
+            detok = _try_detokenize(t, settings.lm_studio.embedding_model)
+            if detok is not None:
+                coerced_texts.append(detok)
+                coerced_info.append("detokenized_list_of_ints")
+                continue
             coerced = " ".join(str(x) for x in t)
             coerced_texts.append(coerced)
             coerced_info.append("list_of_ints")
