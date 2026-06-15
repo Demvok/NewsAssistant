@@ -47,6 +47,52 @@ def get_embeddings_client(base_url: str, model_name: str) -> OpenAIEmbeddings:
             openai_api_base=base_url,
             openai_api_key="not-needed",
         )
+        # Monkeypatch the underlying OpenAI client create/acreate methods to ensure
+        # the 'input' field is always a string or list of strings. Some OpenAI
+        # client variants or model mappings may inadvertently send token ids
+        # (lists of ints) which LM Studio rejects. Coerce non-string inputs to
+        # their string representations to avoid 400 errors.
+        try:
+            client = getattr(_embeddings_client, "client", None)
+            if client is not None and hasattr(client, "create"):
+                orig_create = client.create
+
+                def _coerce_input_and_create(*args, **kwargs):
+                    if "input" in kwargs:
+                        inp = kwargs["input"]
+                        if isinstance(inp, list):
+                            coerced = []
+                            for item in inp:
+                                if isinstance(item, str):
+                                    coerced.append(item)
+                                else:
+                                    coerced.append(str(item))
+                            kwargs["input"] = coerced
+                    return orig_create(*args, **kwargs)
+
+                client.create = _coerce_input_and_create
+
+            # Async variant if present
+            if client is not None and hasattr(client, "acreate"):
+                orig_acreate = client.acreate
+
+                async def _coerce_input_and_acreate(*args, **kwargs):
+                    if "input" in kwargs:
+                        inp = kwargs["input"]
+                        if isinstance(inp, list):
+                            coerced = []
+                            for item in inp:
+                                if isinstance(item, str):
+                                    coerced.append(item)
+                                else:
+                                    coerced.append(str(item))
+                            kwargs["input"] = coerced
+                    return await orig_acreate(*args, **kwargs)
+
+                client.acreate = _coerce_input_and_acreate
+        except Exception:
+            logger.info("Could not patch underlying client.create; continuing without coercion")
+
         logger.info("Embeddings client initialized via langchain_openai")
         return _embeddings_client
     except Exception as e:
