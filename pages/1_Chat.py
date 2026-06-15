@@ -326,7 +326,6 @@ def generate_response(
                 prompt=prompt,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
                 max_tokens=MAX_TOKENS,
             )
             response_data["answer"] = llm_response.text.strip()

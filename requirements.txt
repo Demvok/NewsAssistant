@@ -24,14 +24,18 @@ python-docx
 pandas
 numpy
 pydantic
+pydantic-settings
 
 # Configuration
 python-dotenv
 
+# Database
+sqlalchemy
+pymysql
+
 # Utilities
 requests
 aiohttp
-pydantic-settings
 
 # Logging & Monitoring
 python-json-logger

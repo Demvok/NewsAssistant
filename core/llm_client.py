@@ -110,7 +110,7 @@ class LMStudioClient:
             prompt: Input prompt
             temperature: Sampling temperature (0.0-2.0)
             top_p: Nucleus sampling parameter (0.0-1.0)
-            top_k: Top-k sampling parameter
+            top_k: Top-k sampling parameter (note: not passed to API, kept for compatibility)
             max_tokens: Maximum tokens to generate
 
         Returns:
@@ -127,7 +127,6 @@ class LMStudioClient:
                 prompt=prompt,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
                 max_tokens=max_tokens,
                 timeout=self.timeout,
             )
@@ -185,7 +184,6 @@ class LMStudioClient:
                 messages=messages,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
                 max_tokens=max_tokens,
                 timeout=self.timeout,
             )

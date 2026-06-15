@@ -116,7 +116,6 @@ def run_single_experiment(
             prompt=prompt,
             temperature=temperature,
             top_p=top_p,
-            top_k=top_k,
             max_tokens=MAX_TOKENS,
         )
         

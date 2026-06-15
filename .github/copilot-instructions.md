@@ -152,6 +152,10 @@ project/
     └── 4_Benchmark.py
 ````
 
+All tests shoud be in a separate `tests/` folder with clear naming conventions.
+All documentation should be in a `docs/` folder.
+Store used commands (e.g. using venv, starting application) in README and refer to them during work.
+
 If LangGraph is used, keep graph definitions in a dedicated module and do not mix them into UI code.
 
 ## 7. Local model integration

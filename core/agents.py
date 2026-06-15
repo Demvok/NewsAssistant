@@ -118,7 +118,6 @@ Structure your response with:
             ],
             temperature=settings.generation.temperature,
             top_p=settings.generation.top_p,
-            top_k=settings.generation.top_k,
             max_tokens=settings.generation.max_tokens,
         )
         
@@ -208,7 +207,6 @@ Be critical but fair. Focus on evidence quality and accuracy."""
             ],
             temperature=settings.generation.temperature,
             top_p=settings.generation.top_p,
-            top_k=settings.generation.top_k,
             max_tokens=settings.generation.max_tokens,
         )
         
@@ -293,7 +291,6 @@ Produce a balanced, final answer suitable for publishing."""
             ],
             temperature=max(0.5, settings.generation.temperature - 0.2),
             top_p=settings.generation.top_p,
-            top_k=settings.generation.top_k,
             max_tokens=settings.generation.max_tokens,
         )
         

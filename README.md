@@ -355,17 +355,6 @@ logger.error("Error message")
 2. Increase `top_k_retrieval` for more context
 3. Improve document quality or coverage
 
-## Future Enhancements
-
-- [ ] Web UI deployment
-- [ ] Async processing for large batches
-- [ ] GraphQL/REST API
-- [ ] Multi-model support (Claude, Llama, etc.)
-- [ ] Advanced visualization dashboards
-- [ ] Export to multiple formats (PDF, DOCX, HTML)
-- [ ] Fine-tuning pipelines
-- [ ] Caching and memoization
-
 ## References
 
 - [Streamlit Documentation](https://docs.streamlit.io/)

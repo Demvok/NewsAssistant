@@ -120,6 +120,15 @@ class RAGSettings(BaseModel):
     chromadb: ChromaDBSettings = Field(default_factory=ChromaDBSettings)
 
 
+class DatabaseSettings(BaseModel):
+    """Database connection settings."""
+
+    database_url: Optional[str] = Field(
+        default=None,
+        description="Database connection URL (e.g., mysql+pymysql://user:pass@host:3306/db)",
+    )
+
+
 class AppSettings(BaseModel):
     """Application-level settings."""
 
@@ -151,6 +160,9 @@ class Settings(BaseModel):
     chroma_db_dir: Optional[Path] = None
     benchmark_dir: Optional[Path] = None
     logs_dir: Optional[Path] = None
+
+    # Database settings
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
 
     # Settings groups
     lm_studio: LMStudioSettings = Field(default_factory=LMStudioSettings)
@@ -192,6 +204,11 @@ class Settings(BaseModel):
             chat_model=os.getenv("CHAT_MODEL", "gemma-4-e4b"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "embeddinggemma-300M-GGUF"),
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "60")),
+        )
+
+        # Database settings
+        self.database = DatabaseSettings(
+            database_url=os.getenv("DATABASE_URL"),
         )
 
         # Generation settings
