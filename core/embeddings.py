@@ -154,9 +154,44 @@ def embed_batch(texts: List[str], client: Optional[OpenAIEmbeddings] = None) -> 
     if client is None:
         raise RuntimeError("Embeddings client not initialized. Call get_embeddings_client(base_url, model_name) first.")
 
-    # Coerce to plain strings and log sample types
-    coerced_texts = [str(t) for t in texts]
+    # Coerce to plain strings and handle token-id lists specially
+    import json
+
+    coerced_texts = []
+    coerced_info = []
+    for t in texts:
+        # If already a string, try to detect JSON-encoded list
+        if isinstance(t, str):
+            t_str = t
+            # Detect JSON list encoding like "[1,2,3]"
+            if t_str.strip().startswith("[") and t_str.strip().endswith("]"):
+                try:
+                    parsed = json.loads(t_str)
+                    if isinstance(parsed, (list, tuple)) and all(isinstance(x, int) for x in parsed):
+                        # Convert token id list to spaced numbers to avoid nested arrays
+                        coerced = " ".join(str(x) for x in parsed)
+                        coerced_texts.append(coerced)
+                        coerced_info.append("parsed_list")
+                        continue
+                except Exception:
+                    pass
+            coerced_texts.append(t_str)
+            coerced_info.append("str")
+            continue
+
+        # If it's a list/tuple of ints, join into space-separated string
+        if isinstance(t, (list, tuple)) and all(isinstance(x, int) for x in t):
+            coerced = " ".join(str(x) for x in t)
+            coerced_texts.append(coerced)
+            coerced_info.append("list_of_ints")
+            continue
+
+        # Fallback: coerce to string
+        coerced_texts.append(str(t))
+        coerced_info.append(type(t).__name__)
+
     try:
+        logger.debug(f"Embedding batch input types: {coerced_info[:5]}")
         embeddings = client.embed_documents(coerced_texts)
         if not embeddings or not isinstance(embeddings, list):
             raise RuntimeError("Invalid batch embedding response from OpenAIEmbeddings")
