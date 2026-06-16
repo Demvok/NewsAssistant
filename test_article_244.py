@@ -4,7 +4,7 @@ from config import settings
 from core.db_connector import get_article_by_id
 
 # Test article 244
-article = get_article_by_id(244)
+article = get_article_by_id(65)
 if article:
     print("=== ARTICLE 244 ===")
     print(f"Title: {article.get('title', 'NO TITLE')}")

@@ -42,7 +42,7 @@ class Settings(BaseModel):
     temperature: float
     top_p: float
     top_k: int
-    max_tokens: int
+    max_tokens: Optional[int] = None
 
     # Document chunking
     chunk_size: int

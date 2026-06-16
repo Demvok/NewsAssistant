@@ -20,8 +20,7 @@ generation:
   top_p: 0.95
   # Top-k sampling parameter (keep top k tokens by probability)
   top_k: 40
-  # Maximum tokens to generate per response
-  max_tokens: 512
+  # Max tokens are unlimited (stops on EOS)
 
 rag:
   # Enable retrieval-augmented generation by default
@@ -35,7 +34,7 @@ rag:
 
   chromadb:
     # Distance metric for similarity search (cosine, euclidean, manhattan)
-    distance_metric: "cosine"
+    distance_metric: "euclidean"
     # Number of chunks to retrieve per query
     top_k_retrieval: 10
 
@@ -53,4 +52,4 @@ directories:
 # Override in .env if needed
 models:
   chat_model: "gemma-4-e4b"
-  embedding_model: "embeddinggemma-300M-GGUF"
+  embedding_model: "text-embedding-qwen3-embedding-0.6b"

@@ -118,7 +118,7 @@ def journalist_node(state: AgentState) -> AgentState:
             ],
             temperature=settings.temperature,
             top_p=settings.top_p,
-            max_tokens=settings.max_tokens,
+            **({"max_tokens": settings.max_tokens} if settings.max_tokens is not None else {}),
         )
         
         journalist_response = response.text
@@ -207,7 +207,7 @@ Be critical but fair. Focus on evidence quality and accuracy."""
             ],
             temperature=settings.temperature,
             top_p=settings.top_p,
-            max_tokens=settings.max_tokens,
+            **({"max_tokens": settings.max_tokens} if settings.max_tokens is not None else {}),
         )
         
         critique = response.text
@@ -291,7 +291,7 @@ Produce a balanced, final answer suitable for publishing."""
             ],
             temperature=max(0.5, settings.temperature - 0.2),
             top_p=settings.top_p,
-            max_tokens=settings.max_tokens,
+            **({"max_tokens": settings.max_tokens} if settings.max_tokens is not None else {}),
         )
         
         final_answer = response.text
