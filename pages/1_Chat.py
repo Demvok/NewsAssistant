@@ -125,6 +125,13 @@ with st.sidebar:
         st.success("Chat history cleared")
         st.rerun()
 
+    if st.button("🔄 Reset Model Params", key="reset_params"):
+        st.session_state.temperature = settings.temperature
+        st.session_state.top_p = settings.top_p
+        st.session_state.top_k = settings.top_k
+        st.success("Model parameters reset to default.")
+        st.rerun()
+
 
 # Main chat area
 def render_chat_history():
@@ -144,18 +151,12 @@ def render_chat_history():
                 if isinstance(content, dict) and "retrieved_chunks" in content and content["retrieved_chunks"]:
                     with st.expander("📚 Retrieved Context", expanded=False):
                         for i, chunk in enumerate(content["retrieved_chunks"], 1):
-                            col1, col2 = st.columns([1, 4])
-                            with col1:
-                                st.metric(
-                                    label=f"Chunk {i}",
-                                    value=f"{chunk.get('similarity_score', 0):.3f}",
-                                    label_visibility="collapsed"
-                                )
-                            with col2:
-                                st.write(
-                                    f"**Source**: {chunk.get('filename', 'Unknown')}\n\n"
-                                    f"{chunk.get('content', '')[:500]}..."
-                                )
+                            source = chunk.get("filename", "Unknown Source")
+                            score = chunk.get("similarity_score", 0)
+                            content_snippet = chunk.get("content", "")[:200] + "..." if len(chunk.get("content", "")) > 200 else chunk.get("content", "")
+
+                            st.markdown(f"**Chunk {i}** | Source: `{source}` | Similarity: **{score:.3f}**")
+                            st.code(content_snippet, language="text")
                 
                 # Display agent trace if available
                 if isinstance(content, dict) and "agent_trace" in content and content["agent_trace"]:
