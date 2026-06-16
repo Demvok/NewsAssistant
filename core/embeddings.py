@@ -111,16 +111,29 @@ def get_embeddings_client(base_url: str, model_name: str) -> OpenAIEmbeddings:
             if client is not None and hasattr(client, "create"):
                 orig_create = client.create
 
+                def _coerce_item(item):
+                    # If list/tuple of ints -> detokenize or join numbers
+                    if isinstance(item, (list, tuple)):
+                        if all(isinstance(x, int) for x in item):
+                            detok = _try_detokenize(item, _embedding_model)
+                            if detok is not None:
+                                return detok
+                            return " ".join(str(x) for x in item)
+                        # For other lists, stringify elements
+                        return [str(x) for x in item]
+                    if isinstance(item, bytes):
+                        return item.decode("utf-8", errors="ignore")
+                    if isinstance(item, str):
+                        return item
+                    return str(item)
+
                 def _coerce_input_and_create(*args, **kwargs):
                     if "input" in kwargs:
                         inp = kwargs["input"]
                         if isinstance(inp, list):
                             coerced = []
                             for item in inp:
-                                if isinstance(item, str):
-                                    coerced.append(item)
-                                else:
-                                    coerced.append(str(item))
+                                coerced.append(_coerce_item(item))
                             kwargs["input"] = coerced
                     return orig_create(*args, **kwargs)
 
@@ -136,10 +149,7 @@ def get_embeddings_client(base_url: str, model_name: str) -> OpenAIEmbeddings:
                         if isinstance(inp, list):
                             coerced = []
                             for item in inp:
-                                if isinstance(item, str):
-                                    coerced.append(item)
-                                else:
-                                    coerced.append(str(item))
+                                coerced.append(_coerce_item(item))
                             kwargs["input"] = coerced
                     return await orig_acreate(*args, **kwargs)
 

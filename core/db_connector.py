@@ -407,3 +407,51 @@ def execute_query(query: str):
             data = result.fetchall()
             return data
         return None
+
+
+def get_article_by_id(article_id: int) -> dict | None:
+    """Fetch an article by its article_id using ORM session.
+
+    Returns a dictionary with keys: article_id, title, content, url, article_date
+    or None if not found.
+    """
+    try:
+        with _get_session() as session:
+            row = session.query(DimArticle).filter(DimArticle.article_id == int(article_id)).one_or_none()
+            if row is None:
+                return None
+            return {
+                "article_id": int(row.article_id),
+                "title": row.title,
+                "content": row.content,
+                "url": row.url,
+                "article_date": row.article_date.isoformat() if row.article_date else None,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+    except Exception as e:
+        logger.error(f"Failed to fetch article by id {article_id}: {e}")
+        return None
+
+
+def get_article_by_id(article_id: int) -> dict | None:
+    """Fetch an article by its article_id using ORM session.
+
+    Returns a dictionary with keys: article_id, title, content, url, article_date
+    or None if not found.
+    """
+    try:
+        with _get_session() as session:
+            row = session.query(DimArticle).filter(DimArticle.article_id == int(article_id)).one_or_none()
+            if row is None:
+                return None
+            return {
+                "article_id": int(row.article_id),
+                "title": row.title,
+                "content": row.content,
+                "url": row.url,
+                "article_date": row.article_date.isoformat() if row.article_date else None,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+    except Exception as e:
+        logger.error(f"Failed to fetch article by id {article_id}: {e}")
+        return None

@@ -321,26 +321,90 @@ with tab_search:
 
                 st.session_state.search_results = results
 
+                # Debug helper: allow raw chunk-level inspection
+                debug = st.checkbox("Show debug: raw chunk-level results", key="dbg_raw_chunks")
+
                 if results:
-                    st.success(f"Found {len(results)} matching chunks")
+                    st.success(f"Found {len(results)} matching documents")
+
+                    if debug:
+                        try:
+                            from core.embeddings import embed_text
+                            from ingestion.indexer import get_collection
+
+                            collection = get_collection()
+                            q_emb = embed_text(search_query)
+                            # fetch many chunk-level results for inspection
+                            raw = collection.query(
+                                query_embeddings=[q_emb],
+                                n_results=max(50, 10 * TOP_K_RETRIEVAL),
+                                include=["documents", "metadatas", "distances"],
+                            )
+                            st.markdown("### Raw chunk-level results")
+                            st.write("Documents (first 5 chunks):")
+                            docs = raw.get("documents", [])[0] if raw.get("documents") else []
+                            metadatas = raw.get("metadatas", [])[0] if raw.get("metadatas") else []
+                            distances = raw.get("distances", [])[0] if raw.get("distances") else []
+
+                            rows = []
+                            for i, (d, m, dist) in enumerate(zip(docs, metadatas, distances)):
+                                rows.append({
+                                    "index": i,
+                                    "preview_len": len(d) if d else 0,
+                                    "metadata": m,
+                                    "distance": dist,
+                                })
+                            st.write(rows[:50])
+                        except Exception as e:
+                            st.warning(f"Failed to fetch raw chunk-level results: {e}")
 
                     for i, result in enumerate(results, 1):
+                        doc_key = f"view_full_{result.get('document_id', i)}"
                         with st.expander(
-                            f"📄 Result {i} | {result['filename']} | "
-                            f"Similarity: {result['similarity_score']:.3f}",
+                            f"📄 Result {i} | {result.get('filename','(no title)')} | "
+                            f"Similarity: {result.get('similarity_score',0.0):.3f}",
                             expanded=(i == 1),
                         ):
                             col1, col2 = st.columns([3, 1])
 
                             with col1:
-                                st.write("**Content:**")
-                                st.text(result["content"][:500] + "..." 
-                                        if len(result["content"]) > 500 
-                                        else result["content"])
+                                st.write(f"**Title:** {result.get('filename', result.get('document_id', ''))}")
+
+                                # Load full article immediately to show first N lines
+                                full_text = None
+                                try:
+                                    article_id = result.get('article_id')
+                                    if article_id:
+                                        from core.db_connector import get_article_by_id
+                                        art = get_article_by_id(int(article_id))
+                                        if art and art.get('content'):
+                                            full_text = art.get('content')
+                                    
+                                    # Fallback to file-based loader if SQL entry not available
+                                    if full_text is None:
+                                        from ingestion.loader import load_document
+                                        src = result.get('source')
+                                        if src:
+                                            doc_obj = load_document(src)
+                                            full_text = doc_obj.get('content')
+                                except Exception as e:
+                                    st.warning(f"Could not load article: {str(e)}")
+                                    full_text = None
+                                
+                                # Display first N lines of article
+                                if full_text:
+                                    lines = full_text.split('\n')
+                                    first_lines = '\n'.join([line for line in lines if line.strip()][:10])
+                                    st.write("**First 10 lines:**")
+                                    st.text(first_lines)
+                                else:
+                                    st.warning("Could not load article content")
 
                             with col2:
-                                st.metric("Similarity", f"{result['similarity_score']:.3f}")
-                                st.caption(f"Document: {result['document_id']}")
+                                st.metric("Similarity", f"{result.get('similarity_score',0.0):.3f}")
+                                st.caption(f"Document ID: {result.get('document_id','')}")
+                                st.caption(f"Article ID: {result.get('article_id','N/A')}")
+
 
                 else:
                     st.info("No matching documents found. Try a different query.")

@@ -46,7 +46,7 @@ def initialize_chroma_db(
         # Get or create collection
         _collection = _chroma_client.get_or_create_collection(
             name="news_corpus",
-            metadata={"hnsw:space": "cosine"},
+            metadata={"hnsw:space": "cosine", "dimension": 384},
         )
 
         logger.info(
@@ -93,14 +93,20 @@ def index_chunks(
         texts_raw = [chunk.get("content", "") for chunk in chunks]
         chunk_ids = [chunk.get("id") for chunk in chunks]
 
-        # Prepare metadata
+        # Prepare metadata (include chunk positions and preview for better UI snippets)
+        # NOTE: ChromaDB only stores string metadata, so convert all values to strings
         metadatas = []
         for chunk in chunks:
             metadata = {
-                "document_id": chunk["document_id"],
-                "chunk_order": chunk["chunk_order"],
-                "source": chunk["metadata"].get("source", ""),
-                "filename": chunk["metadata"].get("filename", ""),
+                "document_id": str(chunk["document_id"]),
+                "chunk_order": str(chunk["chunk_order"]),
+                "source": str(chunk.get("metadata", {}).get("source", "")),
+                "filename": str(chunk.get("metadata", {}).get("filename", "")),
+                "article_id": str(chunk.get("metadata", {}).get("article_id", "")),
+                "chunk_id": str(chunk.get("id", "")),
+                "start_char": str(chunk.get("start_char", 0)),
+                "end_char": str(chunk.get("end_char", 0)),
+                "chunk_preview": str(chunk.get("content", "")[:500] if chunk.get("content") else ""),
             }
             metadatas.append(metadata)
 
@@ -135,6 +141,13 @@ def index_chunks(
             print("[DEBUG] Embedding sample (truncated):", repr(valid_texts[0][:200]))
         except Exception:
             logger.info("Failed to log embedding sample")
+
+        # Debug: log sample metadata being stored
+        try:
+            print(f"[DEBUG] First metadata sample: {valid_metadatas[0]}")
+            print(f"[DEBUG] Metadata keys: {list(valid_metadatas[0].keys())}")
+        except Exception:
+            pass
 
         # Generate embeddings for sanitized texts
         embeddings = embed_batch(valid_texts)

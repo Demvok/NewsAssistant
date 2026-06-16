@@ -8,7 +8,7 @@ import logging
 from typing import Callable, Any, Optional
 from datetime import datetime
 
-from ingestion.indexer import get_collection
+# Deferred import: get_collection() is used locally within functions and will be imported where needed or handled dynamically to prevent circular dependency errors.
 
 logger = logging.getLogger(__name__)
 

@@ -89,21 +89,21 @@ def journalist_node(state: AgentState) -> AgentState:
                 context_str += f"{i}. [{source}]: {content}\n"
         
         guidelines = """1. Analyze the query comprehensively
-2. Use retrieved context as the primary source of information
-3. Form a clear, well-supported initial answer
-4. Identify key claims and evidence
-5. Note any gaps or uncertainties in the corpus"""
+                        2. Use retrieved context as the primary source of information
+                        3. Form a clear, well-supported initial answer
+                        4. Identify key claims and evidence
+                        5. Note any gaps or uncertainties in the corpus"""
         
         system_prompt = _create_system_prompt("Journalist", guidelines)
         
         user_prompt = f"""Query: {query}
-{context_str}
+                        {context_str}
 
-Provide a comprehensive initial answer to this query based on the retrieved context. 
-Structure your response with:
-1. Main answer/findings
-2. Supporting evidence from the corpus
-3. Key points and implications"""
+                        Provide a comprehensive initial answer to this query based on the retrieved context. 
+                        Structure your response with:
+                        1. Main answer/findings
+                        2. Supporting evidence from the corpus
+                        3. Key points and implications"""
         
         llm_client = get_llm_client(
             base_url=settings.lm_studio.base_url,
