@@ -12,12 +12,7 @@ from datetime import datetime
 
 from core.llm_client import LMStudioClient
 from core.rag import retrieve_context
-from config import (
-    LM_STUDIO_BASE_URL,
-    CHAT_MODEL,
-    REQUEST_TIMEOUT,
-    DEFAULT_TEMPERATURE,
-)
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +21,7 @@ def run_benchmark_case(
     test_case: dict,
     client: LMStudioClient,
     use_rag: bool = True,
-    temperature: float = DEFAULT_TEMPERATURE,
+    temperature: float = None,
 ) -> dict:
     """Run a single benchmark test case.
     
@@ -41,6 +36,10 @@ def run_benchmark_case(
     """
     test_id = test_case.get("id", "unknown")
     prompt = test_case.get("prompt", "")
+    
+    # Use default temperature if not provided
+    if temperature is None:
+        temperature = settings.temperature
     
     try:
         context_text = ""
@@ -166,7 +165,7 @@ def run_full_benchmark(
     test_cases: list[dict],
     client: LMStudioClient,
     use_rag: bool = True,
-    temperature: float = DEFAULT_TEMPERATURE,
+    temperature: float = None,
 ) -> dict:
     """Run benchmark on all test cases.
     
@@ -179,6 +178,10 @@ def run_full_benchmark(
     Returns:
         Summary results with per-category scores and overall metrics
     """
+    # Use default temperature if not provided
+    if temperature is None:
+        temperature = settings.temperature
+    
     results = []
     total = len(test_cases)
     

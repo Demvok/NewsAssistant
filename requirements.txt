@@ -28,6 +28,7 @@ pydantic-settings
 
 # Configuration
 python-dotenv
+pyyaml
 
 # Database
 sqlalchemy

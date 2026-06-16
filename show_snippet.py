@@ -2,20 +2,20 @@
 """Search for 'green energy' and show first result's snippet."""
 import os
 import chromadb
-from config import Settings
+from config import settings
 from core.embeddings import get_embeddings_client, embed_text
 
 # Initialize config
-settings = Settings()
+# settings already loaded from config module
 
 # Initialize embeddings
 get_embeddings_client(
-    settings.lm_studio.base_url,
-    settings.lm_studio.embedding_model
+    settings.lm_studio_base_url,
+    settings.embedding_model
 )
 
 # Initialize ChromaDB
-db_path = settings.rag.chromadb.persist_directory
+db_path = settings.project_root / settings.chroma_db_dir
 client = chromadb.PersistentClient(path=db_path)
 collection = client.get_collection(name="news_corpus")
 

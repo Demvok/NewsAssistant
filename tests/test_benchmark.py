@@ -7,7 +7,7 @@ from config import settings
 
 def test_benchmark_dataset_exists():
     """Verify sample benchmark dataset exists."""
-    dataset_path = settings.benchmark_dir / "sample_benchmark.json"
+    dataset_path = settings.project_root / settings.benchmark_dir / "sample_benchmark.json"
     assert dataset_path.exists(), "Sample benchmark dataset not found"
     
     with open(dataset_path) as f:

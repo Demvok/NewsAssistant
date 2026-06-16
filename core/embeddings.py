@@ -45,7 +45,7 @@ def _try_detokenize(token_ids: list, tokenizer_name: Optional[str] = None) -> Op
         try:
             from config import settings
 
-            name = settings.lm_studio.embedding_model
+            name = settings.embedding_model
         except Exception:
             name = None
 
@@ -253,7 +253,7 @@ def embed_batch(texts: List[str], client: Optional[OpenAIEmbeddings] = None) -> 
                     parsed = json.loads(t_str)
                     if isinstance(parsed, (list, tuple)) and all(isinstance(x, int) for x in parsed):
                         # Attempt detokenization using tokenizer if available
-                        detok = _try_detokenize(parsed, settings.lm_studio.embedding_model)
+                        detok = _try_detokenize(parsed, settings.embedding_model)
                         if detok is not None:
                             coerced_texts.append(detok)
                             coerced_info.append("detokenized_parsed_list")
@@ -271,7 +271,7 @@ def embed_batch(texts: List[str], client: Optional[OpenAIEmbeddings] = None) -> 
 
         # If it's a list/tuple of ints, try detokenization
         if isinstance(t, (list, tuple)) and all(isinstance(x, int) for x in t):
-            detok = _try_detokenize(t, settings.lm_studio.embedding_model)
+            detok = _try_detokenize(t, settings.embedding_model)
             if detok is not None:
                 coerced_texts.append(detok)
                 coerced_info.append("detokenized_list_of_ints")

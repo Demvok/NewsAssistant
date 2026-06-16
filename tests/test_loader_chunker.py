@@ -8,7 +8,7 @@ from config import settings
 
 # Test 1: Load single document
 print("Test 1: Load Single Document")
-doc_path = settings.raw_data_dir / "test_article.txt"
+doc_path = settings.project_root / settings.raw_data_dir / "test_article.txt"
 if doc_path.exists():
     doc = load_document(str(doc_path))
     print(f"  ✓ Loaded document: {doc['title']}")

@@ -11,12 +11,7 @@ import os
 from pathlib import Path
 from typing import Optional, List, Dict
 
-from config import (
-    settings,
-    CHUNK_SIZE,
-    CHUNK_OVERLAP,
-    TOP_K_RETRIEVAL,
-)
+from config import settings
 from core.utils import setup_logging
 from ingestion.loader import load_document, SUPPORTED_FORMATS
 from ingestion.chunker import chunk_batch
@@ -54,9 +49,9 @@ if "search_results" not in st.session_state:
 # Initialize ChromaDB connection
 try:
     initialize_chroma_db(
-        db_path=settings.rag.chromadb.persist_directory,
-        embedding_base_url=settings.lm_studio.base_url,
-        embedding_model=settings.lm_studio.embedding_model,
+        db_path=settings.project_root / settings.chroma_db_dir,
+        embedding_base_url=settings.lm_studio_base_url,
+        embedding_model=settings.embedding_model,
     )
 except Exception as e:
     logger.warning(f"ChromaDB initialization warning: {str(e)}")
@@ -162,11 +157,11 @@ def load_and_index_files(uploaded_files) -> Dict:
             try:
                 stats = rebuild_index(
                     documents=documents,
-                    chunk_size=CHUNK_SIZE,
-                    chunk_overlap=CHUNK_OVERLAP,
-                    embedding_base_url=settings.lm_studio.base_url,
-                    embedding_model=settings.lm_studio.embedding_model,
-                    db_path=settings.rag.chromadb.persist_directory,
+                    chunk_size=settings.chunk_size,
+                    chunk_overlap=settings.chunk_overlap,
+                    embedding_base_url=settings.lm_studio_base_url,
+                    embedding_model=settings.embedding_model,
+                    db_path=settings.project_root / settings.chroma_db_dir,
                 )
                 results["indexed"] = stats.get("num_chunks", 0)
                 st.session_state.index_built = True
@@ -251,7 +246,7 @@ with tab_upload:
     if st.button("🔄 Rebuild Index from Raw Data", key="rebuild_index"):
         with st.spinner("Rebuilding index..."):
             try:
-                raw_docs_path = settings.raw_data_dir
+                raw_docs_path = settings.project_root / settings.raw_data_dir
                 if not raw_docs_path.exists() or not list(raw_docs_path.glob("*")):
                     st.warning(
                         f"No documents found in {raw_docs_path}. "
@@ -265,11 +260,11 @@ with tab_upload:
                     if documents:
                         stats = rebuild_index(
                             documents=documents,
-                            chunk_size=CHUNK_SIZE,
-                            chunk_overlap=CHUNK_OVERLAP,
-                            embedding_base_url=settings.lm_studio.base_url,
-                            embedding_model=settings.lm_studio.embedding_model,
-                            db_path=settings.rag.chromadb.persist_directory,
+                            chunk_size=settings.chunk_size,
+                            chunk_overlap=settings.chunk_overlap,
+                            embedding_base_url=settings.lm_studio_base_url,
+                            embedding_model=settings.embedding_model,
+                            db_path=settings.project_root / settings.chroma_db_dir,
                         )
                         st.success(
                             f"✅ Index rebuilt: {stats['num_chunks']} chunks "
@@ -300,7 +295,7 @@ with tab_search:
             "Number of results",
             min_value=1,
             max_value=10,
-            value=TOP_K_RETRIEVAL,
+            value=settings.top_k_retrieval,
             help="How many top results to retrieve",
         )
 
@@ -315,8 +310,8 @@ with tab_search:
                 results = retrieve_context(
                     query=search_query,
                     top_k=top_k,
-                    embedding_base_url=settings.lm_studio.base_url,
-                    embedding_model=settings.lm_studio.embedding_model,
+                    embedding_base_url=settings.lm_studio_base_url,
+                    embedding_model=settings.embedding_model,
                 )
 
                 st.session_state.search_results = results
@@ -337,7 +332,7 @@ with tab_search:
                             # fetch many chunk-level results for inspection
                             raw = collection.query(
                                 query_embeddings=[q_emb],
-                                n_results=max(50, 10 * TOP_K_RETRIEVAL),
+                                n_results=max(50, 10 * settings.top_k_retrieval),
                                 include=["documents", "metadatas", "distances"],
                             )
                             st.markdown("### Raw chunk-level results")
@@ -455,7 +450,7 @@ with tab_stats:
                 with col3:
                     st.metric(
                         "Distance Metric",
-                        settings.rag.chromadb.distance_metric,
+                        settings.distance_metric,
                     )
 
                 st.markdown("---")
@@ -530,10 +525,10 @@ with tab_stats:
     col1, col2 = st.columns(2)
 
     with col1:
-        st.metric("Chunk Size", CHUNK_SIZE, "characters")
+        st.metric("Chunk Size", settings.chunk_size, "characters")
 
     with col2:
-        st.metric("Chunk Overlap", CHUNK_OVERLAP, "characters")
+        st.metric("Chunk Overlap", settings.chunk_overlap, "characters")
 
     st.markdown("---")
 

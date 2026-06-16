@@ -106,9 +106,9 @@ def journalist_node(state: AgentState) -> AgentState:
                         3. Key points and implications"""
         
         llm_client = get_llm_client(
-            base_url=settings.lm_studio.base_url,
-            model_name=settings.lm_studio.chat_model,
-            timeout=settings.lm_studio.request_timeout,
+            base_url=settings.lm_studio_base_url,
+            model_name=settings.chat_model,
+            timeout=settings.request_timeout,
         )
         
         response = llm_client.chat(
@@ -116,9 +116,9 @@ def journalist_node(state: AgentState) -> AgentState:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=settings.generation.temperature,
-            top_p=settings.generation.top_p,
-            max_tokens=settings.generation.max_tokens,
+            temperature=settings.temperature,
+            top_p=settings.top_p,
+            max_tokens=settings.max_tokens,
         )
         
         journalist_response = response.text
@@ -195,9 +195,9 @@ Critique this analysis by:
 Be critical but fair. Focus on evidence quality and accuracy."""
         
         llm_client = get_llm_client(
-            base_url=settings.lm_studio.base_url,
-            model_name=settings.lm_studio.chat_model,
-            timeout=settings.lm_studio.request_timeout,
+            base_url=settings.lm_studio_base_url,
+            model_name=settings.chat_model,
+            timeout=settings.request_timeout,
         )
         
         response = llm_client.chat(
@@ -205,9 +205,9 @@ Be critical but fair. Focus on evidence quality and accuracy."""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=settings.generation.temperature,
-            top_p=settings.generation.top_p,
-            max_tokens=settings.generation.max_tokens,
+            temperature=settings.temperature,
+            top_p=settings.top_p,
+            max_tokens=settings.max_tokens,
         )
         
         critique = response.text
@@ -279,9 +279,9 @@ Create a final synthesized answer that:
 Produce a balanced, final answer suitable for publishing."""
         
         llm_client = get_llm_client(
-            base_url=settings.lm_studio.base_url,
-            model_name=settings.lm_studio.chat_model,
-            timeout=settings.lm_studio.request_timeout,
+            base_url=settings.lm_studio_base_url,
+            model_name=settings.chat_model,
+            timeout=settings.request_timeout,
         )
         
         response = llm_client.chat(
@@ -289,9 +289,9 @@ Produce a balanced, final answer suitable for publishing."""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=max(0.5, settings.generation.temperature - 0.2),
-            top_p=settings.generation.top_p,
-            max_tokens=settings.generation.max_tokens,
+            temperature=max(0.5, settings.temperature - 0.2),
+            top_p=settings.top_p,
+            max_tokens=settings.max_tokens,
         )
         
         final_answer = response.text

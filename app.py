@@ -10,23 +10,23 @@ This is the main application runner. Execute with:
 
 import streamlit as st
 import logging
-from config import APP_NAME, APP_VERSION, LOG_LEVEL
+from config import settings
 from core.utils import setup_logging
 
 # Configure logging
-logger = setup_logging(level=LOG_LEVEL)
+logger = setup_logging(level=settings.log_level)
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title=APP_NAME,
+    page_title=settings.app_name,
     page_icon="📰",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # Application title
-st.title(f"📰 {APP_NAME}")
-st.markdown(f"*Version {APP_VERSION}*")
+st.title(f"📰 {settings.app_name}")
+st.markdown(f"*Version {settings.app_version}*")
 
 # Initialize session state
 if "initialized" not in st.session_state:

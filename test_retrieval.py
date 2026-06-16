@@ -2,16 +2,13 @@
 """Test actual retrieval functionality - check if articles work and search works."""
 import os
 import sys
-from config import Settings
-
-# Initialize config
-settings = Settings()
+from config import settings
 
 # Initialize embeddings client first
 from core.embeddings import get_embeddings_client, embed_text
 get_embeddings_client(
-    settings.lm_studio.base_url,
-    settings.lm_studio.embedding_model
+    settings.lm_studio_base_url,
+    settings.embedding_model
 )
 
 # Direct ChromaDB access

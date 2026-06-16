@@ -1,0 +1,56 @@
+# News Intelligence Assistant - Main Configuration
+# This file contains all non-sensitive application settings
+# Sensitive data (URLs, credentials, keys) should be in .env
+
+application:
+  name: "News Intelligence Assistant"
+  version: "0.1.0"
+  log_level: "INFO"
+  streamlit_theme: "dark"
+  multi_agent_enabled_default: false
+
+lm_studio:
+  # Request timeout for LM Studio API calls (seconds)
+  request_timeout: 60
+
+generation:
+  # Temperature for sampling (0.0 = deterministic, higher = more random)
+  temperature: 0.7
+  # Nucleus sampling parameter (0.0-1.0)
+  top_p: 0.95
+  # Top-k sampling parameter (keep top k tokens by probability)
+  top_k: 40
+  # Maximum tokens to generate per response
+  max_tokens: 512
+
+rag:
+  # Enable retrieval-augmented generation by default
+  enabled_by_default: true
+
+  chunking:
+    # Size of each chunk in characters
+    chunk_size: 2500
+    # Overlap between consecutive chunks in characters
+    chunk_overlap: 200
+
+  chromadb:
+    # Distance metric for similarity search (cosine, euclidean, manhattan)
+    distance_metric: "cosine"
+    # Number of chunks to retrieve per query
+    top_k_retrieval: 10
+
+directories:
+  # All paths are relative to project root
+  # Leave null/commented to use defaults
+  data: "data"
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  chroma_db: "data/chroma_db"
+  benchmark: "data/benchmark"
+  logs: "logs"
+
+# LLM model names - non-sensitive defaults
+# Override in .env if needed
+models:
+  chat_model: "gemma-4-e4b"
+  embedding_model: "embeddinggemma-300M-GGUF"

@@ -30,8 +30,8 @@ print(f"  ✓ Chunk Size: {len(sample_chunk['content'])} chars")
 
 # Test 4: Configuration check
 print("Test 4: Configuration Check")
-print(f"  ✓ Chunk Size Config: {settings.rag.chunking.chunk_size}")
-print(f"  ✓ Top-K Retrieval: {settings.rag.chromadb.top_k_retrieval}")
+print(f"  ✓ Chunk Size Config: {settings.chunk_size}")
+    print(f"  ✓ Top-K Retrieval: {settings.top_k_retrieval}")
 print(f"  ✓ ChromaDB Path: {settings.chroma_db_dir}")
 
 print("\n✓ All integration tests passed!")

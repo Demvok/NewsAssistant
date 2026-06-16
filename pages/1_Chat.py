@@ -13,13 +13,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from config import (
-    DEFAULT_TEMPERATURE,
-    DEFAULT_TOP_P,
-    DEFAULT_TOP_K,
-    MAX_TOKENS,
-    TOP_K_RETRIEVAL,
-)
+from config import settings
 from core.llm_client import LMStudioClient
 from core.schemas import ChatMessage
 from core.rag import retrieve_context
@@ -52,13 +46,13 @@ if "tool_calling_enabled" not in st.session_state:
     st.session_state.tool_calling_enabled = False
     
 if "temperature" not in st.session_state:
-    st.session_state.temperature = DEFAULT_TEMPERATURE
+    st.session_state.temperature = settings.temperature
     
 if "top_p" not in st.session_state:
-    st.session_state.top_p = DEFAULT_TOP_P
+    st.session_state.top_p = settings.top_p
     
 if "top_k" not in st.session_state:
-    st.session_state.top_k = DEFAULT_TOP_K
+    st.session_state.top_k = settings.top_k
 
 
 # Sidebar controls
@@ -121,7 +115,7 @@ with st.sidebar:
         "Top-K Chunks",
         min_value=1,
         max_value=20,
-        value=TOP_K_RETRIEVAL,
+        value=settings.top_k_retrieval,
         step=1,
         help="Number of document chunks to retrieve",
     )
@@ -326,7 +320,7 @@ def generate_response(
                 prompt=prompt,
                 temperature=temperature,
                 top_p=top_p,
-                max_tokens=MAX_TOKENS,
+                max_tokens=settings.max_tokens,
             )
             response_data["answer"] = llm_response.text.strip()
             logger.info(
@@ -383,9 +377,9 @@ if (user_input or send_button) and user_input:
             from config import settings
             
             llm_client = LMStudioClient(
-                base_url=settings.lm_studio.base_url,
-                model_name=settings.lm_studio.chat_model,
-                timeout=settings.lm_studio.request_timeout,
+                base_url=settings.lm_studio_base_url,
+                model_name=settings.chat_model,
+                timeout=settings.request_timeout,
             )
             
             # Generate response

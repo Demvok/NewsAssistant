@@ -8,6 +8,7 @@ import logging
 import hashlib
 from typing import Optional
 from uuid import uuid4
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +16,8 @@ logger = logging.getLogger(__name__)
 def chunk_document(
     content: str,
     document_id: str,
-    chunk_size: int = 512,
-    overlap: int = 50,
+    chunk_size: int,
+    overlap: int,
     metadata: Optional[dict] = None,
 ) -> list[dict]:
     """Split document content into chunks.
@@ -83,15 +84,15 @@ def chunk_document(
 
 def chunk_batch(
     documents: list[dict],
-    chunk_size: int = 512,
-    overlap: int = 50,
+    chunk_size: int = None,
+    overlap: int = None,
 ) -> list[dict]:
     """Chunk a batch of documents.
 
     Args:
         documents: List of document dictionaries with 'id', 'content', and optional 'metadata'
-        chunk_size: Target chunk size in characters
-        overlap: Character overlap between consecutive chunks
+        chunk_size: Target chunk size in characters (defaults to settings.chunk_size)
+        overlap: Character overlap between consecutive chunks (defaults to settings.chunk_overlap)
 
     Returns:
         List of all chunks from all documents with metadata
@@ -99,6 +100,11 @@ def chunk_batch(
     Raises:
         ValueError: If documents list is empty or chunk parameters invalid
     """
+    if chunk_size is None:
+        chunk_size = settings.chunk_size
+    if overlap is None:
+        overlap = settings.chunk_overlap
+    
     if not documents:
         raise ValueError("documents list cannot be empty")
 

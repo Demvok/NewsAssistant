@@ -13,13 +13,7 @@ from typing import Optional, Dict, List
 import pandas as pd
 import numpy as np
 
-from config import (
-    settings,
-    DEFAULT_TEMPERATURE,
-    DEFAULT_TOP_P,
-    DEFAULT_TOP_K,
-    MAX_TOKENS,
-)
+from config import settings
 from core.llm_client import LMStudioClient
 from core.utils import setup_logging
 
@@ -57,7 +51,7 @@ def save_experiment_to_disk(experiment_data: Dict) -> Path:
     Returns:
         Path to the saved file
     """
-    experiments_dir = settings.data_dir / "experiments"
+    experiments_dir = settings.project_root / settings.data_dir / "experiments"
     experiments_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -77,7 +71,7 @@ def load_experiments_from_disk() -> List[Dict]:
     Returns:
         List of experiment dictionaries
     """
-    experiments_dir = settings.data_dir / "experiments"
+    experiments_dir = settings.project_root / settings.data_dir / "experiments"
     experiments_dir.mkdir(parents=True, exist_ok=True)
     
     experiments = []
@@ -116,7 +110,7 @@ def run_single_experiment(
             prompt=prompt,
             temperature=temperature,
             top_p=top_p,
-            max_tokens=MAX_TOKENS,
+            max_tokens=settings.max_tokens,
         )
         
         return {
@@ -162,9 +156,9 @@ def run_temperature_experiment(
         Dictionary with experiment results
     """
     llm_client = LMStudioClient(
-        base_url=settings.lm_studio.base_url,
-        model_name=settings.lm_studio.chat_model,
-        timeout=settings.lm_studio.request_timeout,
+        base_url=settings.lm_studio_base_url,
+        model_name=settings.chat_model,
+        timeout=settings.request_timeout,
     )
     
     experiment_data = {
@@ -409,7 +403,7 @@ with tab1:
             "Top-P",
             min_value=0.0,
             max_value=1.0,
-            value=DEFAULT_TOP_P,
+            value=settings.top_p,
             step=0.05,
         )
     
@@ -418,7 +412,7 @@ with tab1:
             "Top-K",
             min_value=1,
             max_value=100,
-            value=DEFAULT_TOP_K,
+            value=settings.top_k,
             step=1,
         )
     

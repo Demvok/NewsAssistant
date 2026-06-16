@@ -20,13 +20,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
-from config import (
-    settings,
-    LM_STUDIO_BASE_URL,
-    CHAT_MODEL,
-    REQUEST_TIMEOUT,
-    DEFAULT_TEMPERATURE,
-)
+from config import settings
 from core.llm_client import LMStudioClient
 from core.evaluator import (
     run_benchmark_case,
@@ -104,8 +98,8 @@ def save_benchmark_dataset(dataset: List[Dict], filename: str) -> Path:
     Returns:
         Path to the saved file
     """
-    settings.benchmark_dir.mkdir(parents=True, exist_ok=True)
-    filepath = settings.benchmark_dir / filename
+    (settings.project_root / settings.benchmark_dir).mkdir(parents=True, exist_ok=True)
+    filepath = settings.project_root / settings.benchmark_dir / filename
     
     with open(filepath, "w") as f:
         json.dump({
@@ -128,8 +122,8 @@ def save_benchmark_results(results: Dict, filename: str) -> Path:
     Returns:
         Path to the saved file
     """
-    settings.benchmark_dir.mkdir(parents=True, exist_ok=True)
-    filepath = settings.benchmark_dir / filename
+    (settings.project_root / settings.benchmark_dir).mkdir(parents=True, exist_ok=True)
+    filepath = settings.project_root / settings.benchmark_dir / filename
     
     with open(filepath, "w") as f:
         json.dump(results, f, indent=2)
@@ -144,8 +138,8 @@ def get_available_datasets() -> List[Path]:
     Returns:
         List of JSON files in benchmark directory
     """
-    settings.benchmark_dir.mkdir(parents=True, exist_ok=True)
-    files = list(settings.benchmark_dir.glob("*.json"))
+    (settings.project_root / settings.benchmark_dir).mkdir(parents=True, exist_ok=True)
+    files = list((settings.project_root / settings.benchmark_dir).glob("*.json"))
     return [f for f in files if not f.name.startswith("result_")]
 
 
@@ -479,7 +473,7 @@ with tab2:
                 "Generation Temperature",
                 min_value=0.0,
                 max_value=2.0,
-                value=DEFAULT_TEMPERATURE,
+                value=settings.temperature,
                 step=0.1,
             )
         
@@ -506,9 +500,9 @@ with tab2:
             
             try:
                 client = LMStudioClient(
-                    base_url=LM_STUDIO_BASE_URL,
-                    model_name=CHAT_MODEL,
-                    timeout=REQUEST_TIMEOUT,
+                    base_url=settings.lm_studio_base_url,
+                    model_name=settings.chat_model,
+                    timeout=settings.request_timeout,
                 )
                 
                 progress_bar = st.progress(0)

@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 """Test article retrieval for article 244."""
-from config import Settings
+from config import settings
 from core.db_connector import get_article_by_id
-
-# Initialize settings (loads from .env)
-settings = Settings()
 
 # Test article 244
 article = get_article_by_id(244)

@@ -52,7 +52,7 @@ def populate_kb(clear, incremental):
     to only add new articles, or --clear to start fresh.
     """
     try:
-        if not settings.database.database_url:
+        if not settings.database_url:
             click.echo("[ERROR] DATABASE_URL not configured in .env", err=True)
             sys.exit(1)
 
@@ -62,22 +62,22 @@ def populate_kb(clear, incremental):
         if incremental:
             click.echo("\n[INFO] Mode: Incremental (adding only new articles)")
             stats = populate_knowledge_base_incremental(
-                database_url=settings.database.database_url,
-                embedding_base_url=settings.lm_studio.base_url,
-                embedding_model=settings.lm_studio.embedding_model,
-                chroma_db_path=settings.rag.chromadb.persist_directory,
-                chunk_size=settings.rag.chunking.chunk_size,
-                chunk_overlap=settings.rag.chunking.chunk_overlap,
+                database_url=settings.database_url,
+                embedding_base_url=settings.lm_studio_base_url,
+                embedding_model=settings.embedding_model,
+                chroma_db_path=settings.project_root / settings.chroma_db_dir,
+                chunk_size=settings.chunk_size,
+                chunk_overlap=settings.chunk_overlap,
             )
         else:
             click.echo(f"\n[INFO] Mode: Full Population (clear={clear})")
             stats = populate_knowledge_base_from_sql(
-                database_url=settings.database.database_url,
-                embedding_base_url=settings.lm_studio.base_url,
-                embedding_model=settings.lm_studio.embedding_model,
-                chroma_db_path=settings.rag.chromadb.persist_directory,
-                chunk_size=settings.rag.chunking.chunk_size,
-                chunk_overlap=settings.rag.chunking.chunk_overlap,
+                database_url=settings.database_url,
+                embedding_base_url=settings.lm_studio_base_url,
+                embedding_model=settings.embedding_model,
+                chroma_db_path=settings.project_root / settings.chroma_db_dir,
+                chunk_size=settings.chunk_size,
+                chunk_overlap=settings.chunk_overlap,
                 clear_existing=clear,
             )
 
@@ -114,9 +114,9 @@ def kb_status():
 
         # Initialize ChromaDB
         initialize_chroma_db(
-            db_path=settings.rag.chromadb.persist_directory,
-            embedding_base_url=settings.lm_studio.base_url,
-            embedding_model=settings.lm_studio.embedding_model,
+            db_path=settings.project_root / settings.chroma_db_dir,
+            embedding_base_url=settings.lm_studio_base_url,
+            embedding_model=settings.embedding_model,
         )
 
         collection = get_collection()
@@ -135,9 +135,9 @@ def kb_status():
         click.echo("=" * 50)
         click.echo(f"Collection name: {stats.get('collection_name', 'N/A')}")
         click.echo(f"Total chunks: {stats.get('total_chunks', 0)}")
-        click.echo(f"ChromaDB path: {settings.rag.chromadb.persist_directory}")
-        click.echo(f"Distance metric: {settings.rag.chromadb.distance_metric}")
-        click.echo(f"Top-K retrieval: {settings.rag.chromadb.top_k_retrieval}")
+        click.echo(f"ChromaDB path: {settings.project_root / settings.chroma_db_dir}")
+        click.echo(f"Distance metric: {settings.distance_metric}")
+        click.echo(f"Top-K retrieval: {settings.top_k_retrieval}")
 
         if stats.get("total_chunks", 0) > 0:
             click.echo("\n[SUCCESS] Knowledge base is ready for search and retrieval")
@@ -161,11 +161,11 @@ def load_articles(topic_id):
     try:
         from ingestion.sql_loader import SQLArticleLoader
 
-        if not settings.database.database_url:
+        if not settings.database_url:
             click.echo("[ERROR] DATABASE_URL not configured in .env", err=True)
             sys.exit(1)
 
-        loader = SQLArticleLoader(settings.database.database_url)
+        loader = SQLArticleLoader(settings.database_url)
 
         if topic_id:
             click.echo(f"Loading articles for topic {topic_id}...")

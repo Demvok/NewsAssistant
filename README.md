@@ -123,9 +123,19 @@ Ensure LM Studio is running and both models are loaded:
 
 ### Running the Application
 
+### Running the Application
+
 ```bash
 streamlit run app.py
 ```
+
+### CLI Commands
+To manage the knowledge base and load articles using the command-line interface (`cli.py`), use the following commands:
+
+- `python cli.py load-articles`                 # Preview articles
+- `python cli.py populate-kb --clear`           # Full population (fresh)
+- `python cli.py populate-kb --incremental`     # Add new articles only
+- `python cli.py kb-status`                     # Check ChromaDB status
 
 The application will be available at `http://localhost:8501`
 
@@ -251,8 +261,8 @@ MAX_TOKENS=512
 # RAG
 RAG_ENABLED_DEFAULT=true
 TOP_K_RETRIEVAL=5
-CHUNK_SIZE=512
-CHUNK_OVERLAP=50
+CHUNK_SIZE=2500
+CHUNK_OVERLAP=200
 
 # Multi-agent
 MULTI_AGENT_ENABLED_DEFAULT=false

@@ -3,11 +3,10 @@
 Manages connection to the database storing articles, events, opinions, and other
 article-related metadata. Uses SQLAlchemy ORM for all database operations.
 
-Configuration via environment variables:
-- DATABASE_URL: Connection string for the database
+Configuration via config.py:
+- settings.database_url: Connection string from .env (DATABASE_URL)
 """
 
-import os
 import time
 from datetime import datetime
 from contextlib import contextmanager
@@ -43,33 +42,22 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_database_url() -> str:
-    """Resolve the database URL from environment or config.
+    """Resolve the database URL from config.
 
-    Order of precedence:
-    1. Environment variable `DATABASE_URL`
-    2. Config module fallback (if available)
+    Uses settings.database_url which loads from .env (DATABASE_URL).
 
     Raises:
-        RuntimeError: If DATABASE_URL is not configured.
+        ValueError: If DATABASE_URL is not configured in .env.
     """
-    # 1) Environment variable
-    url = os.getenv("DATABASE_URL")
-    if url:
-        return url
+    from config import settings
 
-    # 2) Config fallback (optional, lazy import to avoid circular imports)
-    try:
-        from config import settings
+    if not settings.database_url:
+        raise ValueError(
+            "DATABASE_URL is not configured in .env file. "
+            "Set DATABASE_URL in .env (e.g., mysql+pymysql://user:pass@host:3306/db)"
+        )
 
-        if hasattr(settings, "database_url") and settings.database_url:
-            return settings.database_url
-    except Exception as e:
-        logger.debug(f"Could not load DATABASE_URL from config: {e}")
-
-    raise RuntimeError(
-        "DATABASE_URL is not configured. Set the environment variable DATABASE_URL "
-        "or define it in config.py."
-    )
+    return settings.database_url
 
 
 DATABASE_URL = _resolve_database_url()
