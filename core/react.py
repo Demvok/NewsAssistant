@@ -50,12 +50,12 @@ def _direct_tool_request(query: str) -> Optional[dict[str, Any]]:
     if article_match:
         return {"name": "get_article", "args": {"article_id": int(article_match.group(1))}}
 
-    date_matches = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", query)
-    if len(date_matches) >= 2 and any(word in lower_query for word in ["between", "from", "to", "since", "until", "між", "від", "до"]):
-        return {
-            "name": "filter_articles_by_date",
-            "args": {"start_date": date_matches[0], "end_date": date_matches[1]},
-        }
+    # date_matches = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", query)
+    # if len(date_matches) >= 2 and any(word in lower_query for word in ["between", "from", "to", "since", "until", "між", "від", "до"]):
+    #     return {
+    #         "name": "filter_articles_by_date",
+    #         "args": {"start_date": date_matches[0], "end_date": date_matches[1]},
+    #     }
 
     keyword_match = re.search(
         r"(?:count|how many|mentions?)\s+(?:of\s+)?(?:the\s+)?['\"]?([\w\- ]+?)['\"]?(?:\s+in|\s+across|\?|$)",
@@ -72,6 +72,13 @@ def _direct_tool_request(query: str) -> Optional[dict[str, Any]]:
 
 def _build_tool_catalog(tool_registry: ToolRegistry) -> str:
     return "\n".join(f"- {tool['name']}: {tool['description']}" for tool in tool_registry.list_tools())
+
+
+def _normalize_tool_name(value: str) -> str:
+    text = value.strip()
+    text = re.sub(r"^[`*\s]+|[`*\s]+$", "", text)
+    match = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", text)
+    return match.group(1) if match else text
 
 
 def _build_prompt(
@@ -116,27 +123,26 @@ def _build_prompt(
 
             {context_text}
 
-            Previous steps:
+            Previous steps: 
             {history_text}
 
             Return exactly one step using this format:
             Thought: brief reasoning
-            Action: one of [search_articles, get_article, filter_articles_by_date, count_keyword_mentions, Finish]
+            Action: one of available tools or "Finish"
             Action Input: JSON object for the chosen tool
 
-            If you are done, return:
-            Thought: brief reasoning
-            Action: Finish
-            Final: your final answer
+            If you are think you are DONE, answer the request with all context and return:
+            Final: your final answer to the user (Do not include any tool calls, references to steps, or internal reasoning, only the final answer. Do not talk about next steps, provide answer now.)
+
 
             Do not add markdown. Do not add explanations outside the format above."""
 
 
 def _parse_response(text: str) -> dict[str, Any]:
-    thought_match = re.search(r"(?mi)^Thought:\s*(.+)$", text)
-    action_match = re.search(r"(?mi)^Action:\s*(.+)$", text)
-    final_match = re.search(r"(?mis)^Final:\s*(.+)$", text)
-    input_match = re.search(r"(?mis)^Action Input:\s*(.+?)(?:\n[A-Z][A-Za-z ]+:|\Z)", text)
+    thought_match = re.search(r"(?mi)^\*?Thought\*?:\s*(.+)$", text)
+    action_match = re.search(r"(?mi)^\*?Action\*?:\s*(.+)$", text)
+    final_match = re.search(r"(?mis)^\*?Final\*?:\s*(.+)$", text)
+    input_match = re.search(r"(?mis)^\*?Action Input\*?:\s*(.+?)(?:\n\*?[A-Z][A-Za-z ]+\*?:|\Z)", text)
 
     action_input: dict[str, Any] = {}
     if input_match:
@@ -148,10 +154,19 @@ def _parse_response(text: str) -> dict[str, Any]:
             if number_match:
                 action_input = {"article_id": int(number_match.group(1))}
 
+    action_text = action_match.group(1).strip() if action_match else ""
+    if action_text:
+        action_text = action_text.split("(", 1)[0].strip()
+        action_text = _normalize_tool_name(action_text)
+
+    final_text = final_match.group(1).strip() if final_match else ""
+    if final_text:
+        final_text = re.sub(r"^\*+|\*+$", "", final_text).strip()
+
     return {
         "thought": thought_match.group(1).strip() if thought_match else "",
-        "action": action_match.group(1).strip() if action_match else "",
-        "final": final_match.group(1).strip() if final_match else "",
+        "action": action_text,
+        "final": final_text,
         "action_input": action_input,
     }
 
@@ -162,11 +177,114 @@ def _format_observation(result: Any) -> str:
     return str(result)
 
 
+def _build_synthesis_prompt(
+    query: str,
+    steps: list[dict[str, Any]],
+    retrieved_context: Optional[list[dict[str, Any]]] = None,
+    draft_answer: str = "",
+) -> str:
+    step_lines: list[str] = []
+    for index, step in enumerate(steps, 1):
+        step_lines.append(f"Step {index} Thought: {step.get('thought', '')}")
+        step_lines.append(f"Step {index} Action: {step.get('action', '')}")
+        if step.get("tool_name"):
+            step_lines.append(f"Step {index} Tool: {step.get('tool_name')}")
+        if step.get("tool_input"):
+            step_lines.append(
+                f"Step {index} Input: {json.dumps(step.get('tool_input', {}), ensure_ascii=False, default=str)}"
+            )
+        if step.get("observation"):
+            step_lines.append(f"Step {index} Observation: {step.get('observation', '')[:1200]}")
+
+    context_lines: list[str] = []
+    if retrieved_context:
+        context_lines.append("Retrieved context:")
+        for index, item in enumerate(retrieved_context[:5], 1):
+            source = item.get("filename", "Unknown")
+            similarity = item.get("similarity_score", 0)
+            content = item.get("content", "")[:900]
+            context_lines.append(f"{index}. Source: {source} | Similarity: {similarity:.3f}")
+            context_lines.append(content)
+
+    step_text = "\n".join(step_lines) if step_lines else "(no tool steps were taken)"
+    context_text = "\n".join(context_lines) if context_lines else "(no retrieved context)"
+
+    return f"""You are writing the final answer to the user.
+
+Original question:
+{query}
+
+Collected context:
+{context_text}
+
+Tool and reasoning trace:
+{step_text}
+
+Draft answer from the planner:
+{draft_answer or '(none)'}
+
+Write a natural language final answer that directly answers the original question.
+Use the gathered evidence and results from the trace.
+Summarize what was checked, what was found, and the conclusion.
+Do not mention Thought/Action/Observation labels, internal steps, or that you are summarizing a trace.
+Do not use markdown.
+Keep the tone clear, direct, and human."""
+
+
+def _synthesize_final_answer(
+    query: str,
+    llm_client: LMStudioClient,
+    steps: list[dict[str, Any]],
+    retrieved_context: Optional[list[dict[str, Any]]] = None,
+    draft_answer: str = "",
+    temperature: float = 0.2,
+    top_p: float = 0.9,
+) -> str:
+    prompt = _build_synthesis_prompt(
+        query=query,
+        steps=steps,
+        retrieved_context=retrieved_context,
+        draft_answer=draft_answer,
+    )
+    response = llm_client.complete(
+        prompt=prompt,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=40,
+        max_tokens=512,
+    )
+    return (response.text or "").strip()
+
+
 def _run_tool(tool_registry: ToolRegistry, name: str, args: dict[str, Any]) -> Any:
     tool = tool_registry.get_tool(name)
     if tool is None:
         raise RuntimeError(f"Unknown tool: {name}")
     return tool(**args)
+
+
+def _coerce_action_input(action: str, action_input: dict[str, Any], thought: str, query: str) -> dict[str, Any]:
+    if action_input:
+        return action_input
+
+    normalized_action = action.strip().lower()
+    if normalized_action == "search_articles":
+        fallback_query = thought.strip() or query.strip()
+        return {"query": fallback_query, "top_k": 5}
+
+    if normalized_action == "get_article":
+        source_text = thought or query
+        match = re.search(r"\b(\d+)\b", source_text)
+        if match:
+            return {"article_id": int(match.group(1))}
+
+    if normalized_action == "count_keyword_mentions":
+        source_text = thought or query
+        keyword = source_text.strip()
+        if keyword:
+            return {"keyword": keyword}
+
+    return action_input
 
 
 def run_react_loop(
@@ -221,7 +339,7 @@ def run_react_loop(
         try:
             response = llm_client.complete(
                 prompt=prompt,
-                temperature=max(0.1, temperature - 0.2),
+                temperature=temperature,
                 top_p=top_p,
                 top_k=top_k,
                 max_tokens=None,
@@ -242,13 +360,24 @@ def run_react_loop(
         parsed = _parse_response(text)
         thought = parsed["thought"]
         action = parsed["action"]
-        action_input = parsed["action_input"]
+        action_input = _coerce_action_input(action, parsed["action_input"], thought, query)
         final = parsed["final"]
 
         if action.lower() == "finish":
             steps.append({"thought": thought, "action": "Finish", "observation": final})
             result.steps = steps
-            result.answer = final or thought or "Unable to answer."
+            try:
+                synthesized_answer = _synthesize_final_answer(
+                    query=query,
+                    llm_client=llm_client,
+                    steps=steps,
+                    retrieved_context=retrieved_context,
+                    draft_answer=final,
+                )
+                result.answer = synthesized_answer or final or thought or "Unable to answer."
+            except Exception as exc:
+                logger.error("ReAct final synthesis failed: %s", exc)
+                result.answer = final or thought or "Unable to answer."
             result.finished = True
             return asdict(result)
 

@@ -23,7 +23,7 @@ from core.react import run_react_loop
 from core.tools import (
     create_default_tools,
     count_keyword_mentions,
-    filter_articles_by_date,
+    # filter_articles_by_date,
     get_article,
     search_articles,
 )
@@ -172,18 +172,26 @@ def render_chat_history():
                 if isinstance(content, dict) and "agent_trace" in content and content["agent_trace"]:
                     with st.expander("🔗 Agent Reasoning Trace", expanded=False):
                         for step in content["agent_trace"]:
-                            st.write(f"**{step.get('agent', 'Unknown')}**: {step.get('reasoning', '')}")
+                            st.write(f"**Thought**: {step.get('thought', '')}\n\n**Action**: {step.get('action', '')} (**Tool**: {step.get('tool', 'N/A')})")
                 
                 # Display tool calls if available
                 if isinstance(content, dict) and "tool_calls" in content and content["tool_calls"]:
                     with st.expander("🔧 Tool Calls", expanded=False):
                         for tool_call in content["tool_calls"]:
-                            st.code(
-                                f"Tool: {tool_call.get('name', 'unknown')}\n"
-                                f"Args: {tool_call.get('args', {})}\n"
-                                f"Result: {tool_call.get('result', '')}",
-                                language="python"
-                            )
+                            name = tool_call.get('name', 'unknown')
+                            args = tool_call.get('args', {})
+                            result = tool_call.get('result', '')
+
+                            st.markdown(f"**Tool Called**: `{name}`")
+                            st.markdown("**Parameters:**")
+                            # Display arguments clearly, using code block for structure if complex
+                            if args:
+                                st.code(str(args), language="json")
+                            else:
+                                st.info("No specific parameters provided.")
+
+                            st.markdown("**Result**:")
+                            st.code(result, language="text")
 
 
 def format_rag_context(retrieved_chunks: list) -> str:
@@ -249,10 +257,10 @@ def _get_available_tools() -> dict[str, dict]:
             "description": "Fetch a specific article by its ID and get its full content and metadata.",
             "params": ["article_id (int)"],
         },
-        "filter_articles_by_date": {
-            "description": "Find articles published within a specific date range.",
-            "params": ["start_date (str, ISO format YYYY-MM-DD)", "end_date (str, ISO format YYYY-MM-DD)"],
-        },
+        # "filter_articles_by_date": {
+        #     "description": "Find articles published within a specific date range.",
+        #     "params": ["start_date (str, ISO format YYYY-MM-DD)", "end_date (str, ISO format YYYY-MM-DD)"],
+        # },
         "count_keyword_mentions": {
             "description": "Count how many times a keyword appears in the article corpus.",
             "params": ["keyword (str)"],
