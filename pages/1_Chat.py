@@ -214,12 +214,13 @@ def build_prompt(
     Returns:
         Formatted prompt string
     """
-    system_prompt = (
-        "You are an AI News Intelligence Assistant specialized in analyzing CNN news articles. "
-        "You focus on three key themes: green energy, the U.S. trade war, and social media censorship. "
-        "Provide analytical, grounded responses based on the provided context when available. "
-        "When answering, cite specific sources from the retrieved documents."
-    )
+    system_prompt = ("""
+        You are an AI News Intelligence Assistant specialized in analyzing news articles.
+        You focus on three key themes: green energy, the U.S. trade war, and social media censorship.
+        Provide analytical, grounded responses based on the provided context when available.
+        When answering, cite specific sources from the retrieved documents.
+        Answer in the language of the user's query, and maintain a professional and informative tone.
+    """)
     
     prompt = f"System: {system_prompt}\n\n"
     

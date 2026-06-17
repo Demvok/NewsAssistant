@@ -5,7 +5,6 @@ repeated sampling, output variability analysis, and results visualization.
 """
 
 import streamlit as st
-import logging
 import json
 from datetime import datetime
 from pathlib import Path
@@ -116,8 +115,8 @@ def run_single_experiment(
         return {
             "text": response.text,
             "length": len(response.text),
-            "tokens": response.tokens_used,
-            "latency_ms": response.latency_ms,
+            "tokens": int(response.tokens_used) if hasattr(response.tokens_used, 'item') else int(response.tokens_used),
+            "latency_ms": float(response.latency_ms) if hasattr(response.latency_ms, 'item') else float(response.latency_ms),
             "finish_reason": response.finish_reason,
             "success": True,
             "error": None,
@@ -211,11 +210,11 @@ def run_temperature_experiment(
             latencies = [r["latency_ms"] for r in successful_runs]
             
             temp_results["stats"] = {
-                "avg_length": np.mean(lengths),
-                "min_length": np.min(lengths),
-                "max_length": np.max(lengths),
-                "std_length": np.std(lengths),
-                "avg_latency_ms": np.mean(latencies),
+                "avg_length": float(np.mean(lengths)),
+                "min_length": int(np.min(lengths)),
+                "max_length": int(np.max(lengths)),
+                "std_length": float(np.std(lengths)),
+                "avg_latency_ms": float(np.mean(latencies)),
                 "success_rate": len(successful_runs) / len(temp_results["runs"]),
             }
         else:
@@ -245,10 +244,10 @@ def run_temperature_experiment(
         experiment_data["summary"] = {
             "total_runs": total_runs,
             "successful_runs": len(all_lengths),
-            "overall_avg_length": np.mean(all_lengths),
-            "overall_std_length": np.std(all_lengths),
-            "min_length": np.min(all_lengths),
-            "max_length": np.max(all_lengths),
+            "overall_avg_length": float(np.mean(all_lengths)),
+            "overall_std_length": float(np.std(all_lengths)),
+            "min_length": int(np.min(all_lengths)),
+            "max_length": int(np.max(all_lengths)),
         }
     
     logger.info(f"Experiment completed: {experiment_data['summary']}")
@@ -296,9 +295,15 @@ def export_experiment_results(
     Returns:
         Exported data as bytes
     """
+    class NumpyEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, (np.integer, np.floating)):
+                return obj.item()
+            return json.JSONEncoder.default(self, obj)
+
     try:
         if format_type == "json":
-            return json.dumps(experiment_data, indent=2).encode()
+            return json.dumps(experiment_data, indent=2, cls=NumpyEncoder).encode()
         
         elif format_type == "csv":
             df = format_experiment_results_df(experiment_data)
@@ -391,7 +396,7 @@ with tab1:
         for t in np.arange(temp_min, temp_max + temp_step / 2, temp_step)
     ]
     
-    st.info(f"**Temperatures to test:** {temperatures}")
+    st.info(f"**Temperatures to test:** {', '.join(str(t) for t in temperatures)}")
     
     st.markdown("---")
     
@@ -422,7 +427,7 @@ with tab1:
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        if st.button("🚀 Run Experiment", use_container_width=True, key="run_exp"):
+        if st.button("🚀 Run Experiment", use_container_width=True, width='stretch', key="run_exp"):
             with st.spinner("Running experiment..."):
                 try:
                     experiment_data = run_temperature_experiment(
@@ -446,7 +451,7 @@ with tab1:
                     logger.error(error_msg)
     
     with col2:
-        if st.button("📂 Load Previous Experiments", use_container_width=True, key="load_exp"):
+        if st.button("📂 Load Previous Experiments", use_container_width=True,  width='stretch', key="load_exp"):
             st.session_state.experiments = load_experiments_from_disk()
             st.info(f"Loaded {len(st.session_state.experiments)} experiment(s)")
 
@@ -538,7 +543,7 @@ with tab2:
             col1, col2, col3 = st.columns([2, 1, 1])
             
             with col1:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, use_container_width=True, width='stretch')
             
             with col2:
                 if st.button("📋 Copy Results", key="copy_results"):
@@ -640,6 +645,7 @@ with tab3:
                     st.bar_chart(
                         data=df_chart.groupby("Temperature")["Length"].mean(),
                         use_container_width=True,
+                        width='stretch'
                     )
                     
                     st.caption("Average output length by temperature")
@@ -668,6 +674,7 @@ with tab3:
                     st.line_chart(
                         data=df_latency.groupby("Temperature")["Latency"].mean(),
                         use_container_width=True,
+                        width='stretch'
                     )
                     
                     st.caption("Average generation latency by temperature")
@@ -692,6 +699,7 @@ with tab3:
                     st.bar_chart(
                         pd.Series(variability_data),
                         use_container_width=True,
+                        width='stretch'
                     )
                     
                     st.caption("Standard deviation of output lengths by temperature")
@@ -715,7 +723,7 @@ with tab3:
                     })
                 
                 df_stats = pd.DataFrame(stats_rows)
-                st.dataframe(df_stats, use_container_width=True)
+                st.dataframe(df_stats, use_container_width=True,  width='stretch')
                 
                 st.markdown("---")
                 

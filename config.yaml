@@ -52,4 +52,4 @@ directories:
 # Override in .env if needed
 models:
   chat_model: "gemma-4-e4b"
-  embedding_model: "text-embedding-qwen3-embedding-0.6b"
+  embedding_model: "text-embedding-embeddinggemma-300m"
