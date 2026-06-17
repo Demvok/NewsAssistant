@@ -10,6 +10,9 @@ import tempfile
 import os
 from pathlib import Path
 from typing import Optional, List, Dict
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
 from config import settings
 from core.utils import setup_logging
@@ -22,7 +25,8 @@ from ingestion.indexer import (
     get_collection,
     rebuild_index,
 )
-from core.rag import retrieve_context
+from core.tools import search_articles
+from core.db_connector import get_article_by_id # Using the DB connector to fetch article details
 
 # Configure logging
 logger = setup_logging(level="INFO")
@@ -49,7 +53,7 @@ if "search_results" not in st.session_state:
 # Initialize ChromaDB connection
 try:
     initialize_chroma_db(
-        db_path=settings.project_root / settings.chroma_db_dir,
+        db_path=str(settings.project_root / settings.chroma_db_dir),
         embedding_base_url=settings.lm_studio_base_url,
         embedding_model=settings.embedding_model,
     )
@@ -65,7 +69,7 @@ def get_collection_documents() -> Dict[str, int]:
 
     try:
         all_data = collection.get(include=["metadatas"])
-        if not all_data or not all_data.get("metadatas"):
+        if not all_data or not isinstance(all_data, dict) or "metadatas" not in all_data:
             return {}
 
         doc_count = {}
@@ -89,10 +93,10 @@ def get_chunk_statistics() -> Optional[Dict]:
 
     try:
         all_data = collection.get(include=["metadatas", "documents"])
-        if not all_data or not all_data.get("documents"):
+        if not all_data or not isinstance(all_data, dict) or "documents" not in all_data:
             return None
 
-        chunk_sizes = [len(doc) for doc in all_data.get("documents", [])]
+        chunk_sizes = [len(doc) for doc in all_data["documents"]]
         num_chunks = len(chunk_sizes)
 
         if not chunk_sizes:
@@ -161,7 +165,7 @@ def load_and_index_files(uploaded_files) -> Dict:
                     chunk_overlap=settings.chunk_overlap,
                     embedding_base_url=settings.lm_studio_base_url,
                     embedding_model=settings.embedding_model,
-                    db_path=settings.project_root / settings.chroma_db_dir,
+                    db_path=str(settings.project_root / settings.chroma_db_dir),
                 )
                 results["indexed"] = stats.get("num_chunks", 0)
                 st.session_state.index_built = True
@@ -264,7 +268,7 @@ with tab_upload:
                             chunk_overlap=settings.chunk_overlap,
                             embedding_base_url=settings.lm_studio_base_url,
                             embedding_model=settings.embedding_model,
-                            db_path=settings.project_root / settings.chroma_db_dir,
+                            db_path=str(settings.project_root / settings.chroma_db_dir),
                         )
                         st.success(
                             f"✅ Index rebuilt: {stats['num_chunks']} chunks "
@@ -307,7 +311,7 @@ with tab_search:
             st.warning("Please enter a search query")
         else:
             try:
-                results = retrieve_context(
+                results = search_articles(
                     query=search_query,
                     top_k=top_k,
                     embedding_base_url=settings.lm_studio_base_url,
@@ -316,42 +320,9 @@ with tab_search:
 
                 st.session_state.search_results = results
 
-                # Debug helper: allow raw chunk-level inspection
-                debug = st.checkbox("Show debug: raw chunk-level results", key="dbg_raw_chunks")
 
                 if results:
                     st.success(f"Found {len(results)} matching documents")
-
-                    if debug:
-                        try:
-                            from core.embeddings import embed_text
-                            from ingestion.indexer import get_collection
-
-                            collection = get_collection()
-                            q_emb = embed_text(search_query)
-                            # fetch many chunk-level results for inspection
-                            raw = collection.query(
-                                query_embeddings=[q_emb],
-                                n_results=max(50, 10 * settings.top_k_retrieval),
-                                include=["documents", "metadatas", "distances"],
-                            )
-                            st.markdown("### Raw chunk-level results")
-                            st.write("Documents (first 5 chunks):")
-                            docs = raw.get("documents", [])[0] if raw.get("documents") else []
-                            metadatas = raw.get("metadatas", [])[0] if raw.get("metadatas") else []
-                            distances = raw.get("distances", [])[0] if raw.get("distances") else []
-
-                            rows = []
-                            for i, (d, m, dist) in enumerate(zip(docs, metadatas, distances)):
-                                rows.append({
-                                    "index": i,
-                                    "preview_len": len(d) if d else 0,
-                                    "metadata": m,
-                                    "distance": dist,
-                                })
-                            st.write(rows[:50])
-                        except Exception as e:
-                            st.warning(f"Failed to fetch raw chunk-level results: {e}")
 
                     for i, result in enumerate(results, 1):
                         doc_key = f"view_full_{result.get('document_id', i)}"
@@ -365,7 +336,7 @@ with tab_search:
                             with col1:
                                 st.write(f"**Title:** {result.get('filename', result.get('document_id', ''))}")
 
-                                # Load full article immediately to show first N lines
+                                # Load full article immediately
                                 full_text = None
                                 try:
                                     article_id = result.get('article_id')
@@ -386,12 +357,9 @@ with tab_search:
                                     st.warning(f"Could not load article: {str(e)}")
                                     full_text = None
                                 
-                                # Display first N lines of article
+                                # Display the article
                                 if full_text:
-                                    lines = full_text.split('\n')
-                                    first_lines = '\n'.join([line for line in lines if line.strip()][:10])
-                                    st.write("**First 10 lines:**")
-                                    st.text(first_lines)
+                                    st.text(full_text)
                                 else:
                                     st.warning("Could not load article content")
 
@@ -543,7 +511,3 @@ with tab_stats:
     with col2:
         st.caption("ChromaDB Directory")
         st.code(str(settings.chroma_db_dir))
-
-
-if __name__ == "__main__":
-    pass

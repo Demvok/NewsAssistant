@@ -11,7 +11,7 @@ from typing import Optional
 from datetime import datetime
 
 from core.llm_client import LMStudioClient
-from core.rag import retrieve_context
+from core.tools import search_articles
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def run_benchmark_case(
         
         if use_rag:
             try:
-                retrieved_chunks = retrieve_context(prompt, top_k=5)
+                retrieved_chunks = search_articles(prompt, top_k=5)
                 context_text = "\n\n".join(
                     [chunk.get("content", "") for chunk in retrieved_chunks[:5]]
                 )

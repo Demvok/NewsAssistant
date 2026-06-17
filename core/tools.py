@@ -5,12 +5,79 @@ interact with the corpus and perform specific analytical tasks.
 """
 
 import logging
+from functools import lru_cache
 from typing import Callable, Any, Optional
 from datetime import datetime
 
-# Deferred import: get_collection() is used locally within functions and will be imported where needed or handled dynamically to prevent circular dependency errors.
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.pool import QueuePool
+
+from config import settings
+from ingestion.indexer import get_collection, initialize_chroma_db
+from core.embeddings import embed_text, get_embeddings_client
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _get_sql_engine() -> Engine:
+    """Create or reuse the SQLAlchemy engine used by article tools."""
+    if not settings.database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    return create_engine(
+        settings.database_url,
+        poolclass=QueuePool,
+        pool_size=5,
+        max_overflow=10,
+        pool_pre_ping=True,
+        echo=False,
+    )
+
+
+def _format_datetime(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+
+def _row_to_article(row: Any) -> dict:
+    return {
+        "article_id": int(row.article_id),
+        "title": row.title or "Untitled",
+        "content": row.content or "",
+        "url": row.url or "",
+        "article_date": _format_datetime(getattr(row, "article_date", None)),
+        "metadata": {
+            "topic_id": getattr(row, "topic_id", None),
+            "created_at": _format_datetime(getattr(row, "created_at", None)),
+        },
+    }
+
+
+
+def _fetch_articles(query: str, params: Optional[dict[str, Any]] = None) -> list[dict]:
+    engine = _get_sql_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text(query), params or {})
+        rows = result.fetchall()
+    return [_row_to_article(row) for row in rows]
+
+
+def _ensure_collection_initialized() -> None:
+    """Initialize the ChromaDB collection on demand."""
+    if get_collection() is not None:
+        return
+
+    initialize_chroma_db(
+        db_path=str(settings.project_root / settings.chroma_db_dir),
+        embedding_base_url=settings.lm_studio_base_url,
+        embedding_model=settings.embedding_model,
+    )
 
 
 class ToolRegistry:
@@ -61,248 +128,308 @@ class ToolRegistry:
         ]
 
 
-def search_by_topic(topic: str) -> dict:
-    """Search documents by topic using semantic similarity.
-    
-    Performs a semantic search on the corpus for the given topic.
-    
-    Args:
-        topic: Topic name or description to search for
-        
-    Returns:
-        Dictionary with search results including matching documents and metadata
-        
-    Raises:
-        ValueError: If topic is empty
-        RuntimeError: If collection is not initialized
-    """
-    if not topic or not topic.strip():
-        raise ValueError("Topic cannot be empty")
-    
+def search_articles(
+    query: str,
+    top_k: int = 5,
+    embedding_base_url: Optional[str] = None,
+    embedding_model: Optional[str] = None,
+) -> list[dict]:
+    """Retrieve relevant article chunks for a query."""
+    if not query or not query.strip():
+        raise ValueError("Query cannot be empty")
+
+    _ensure_collection_initialized()
     collection = get_collection()
     if collection is None:
         raise RuntimeError(
             "Collection not initialized. Please build the knowledge base first."
         )
-    
-    logger.info(f"Searching for topic: {topic}")
-    
+
+    logger.debug(f"Retrieving documents for query: {query[:100]}...")
+
     try:
-        from core.embeddings import embed_text
-        
-        # Generate embedding for the topic query
-        topic_embedding = embed_text(topic)
-        
-        # Query collection with semantic search
+        if embedding_base_url and embedding_model:
+            get_embeddings_client(embedding_base_url, embedding_model)
+
+        query_embedding = embed_text(query)
+        chunk_results_k = max(top_k * 10, 50)
         results = collection.query(
-            query_embeddings=[topic_embedding],
-            n_results=10,
+            query_embeddings=[query_embedding],
+            n_results=chunk_results_k,
             include=["documents", "metadatas", "distances"],
         )
-        
-        # Format results
-        matched_documents = []
-        if results and results["documents"] and len(results["documents"]) > 0:
-            docs = results["documents"][0]
-            metadatas = results["metadatas"][0] if results["metadatas"] else []
-            distances = results["distances"][0] if results["distances"] else []
-            
-            for i, (doc_text, metadata, distance) in enumerate(
-                zip(docs, metadatas, distances)
-            ):
-                similarity_score = 1 - distance
-                matched_documents.append({
-                    "rank": i + 1,
-                    "content": doc_text,
-                    "similarity": round(similarity_score, 4),
-                    "source": metadata.get("source", ""),
-                    "filename": metadata.get("filename", ""),
-                    "document_id": metadata.get("document_id", ""),
-                })
-        
-        logger.info(f"Found {len(matched_documents)} documents for topic: {topic}")
-        
-        return {
-            "topic": topic,
-            "num_results": len(matched_documents),
-            "results": matched_documents,
-            "metadata": {
-                "search_type": "semantic",
-                "timestamp": datetime.now().isoformat(),
-            },
-        }
-    
+
+        doc_scores: dict[str, dict[str, Any]] = {}
+        if results and results.get("documents"):
+            docs = results.get("documents") or []
+            metadatas = results.get("metadatas") or []
+            distances = results.get("distances") or []
+
+            docs = docs[0] if docs else []
+            metadatas = metadatas[0] if metadatas else []
+            distances = distances[0] if distances else []
+
+            for doc_text, metadata, distance in zip(docs, metadatas, distances):
+                document_id = str(
+                    metadata.get("document_id")
+                    or metadata.get("document")
+                    or metadata.get("filename")
+                    or "unknown"
+                )
+                article_id = metadata.get("article_id") or metadata.get("articleId")
+                similarity = 1 - (distance if distance is not None else 0)
+                chunk_preview = metadata.get("chunk_preview") or (doc_text[:1000] if doc_text else "")
+
+                chunk_entry = {
+                    "text": doc_text,
+                    "start_char": metadata.get("start_char"),
+                    "end_char": metadata.get("end_char"),
+                    "preview": chunk_preview,
+                    "similarity": similarity,
+                }
+
+                entry = doc_scores.get(document_id)
+                if entry is None:
+                    doc_scores[document_id] = {
+                        "document_id": document_id,
+                        "article_id": article_id,
+                        "title": metadata.get("title", ""),
+                        "filename": metadata.get("filename", ""),
+                        "source": metadata.get("source", ""),
+                        "article_date": metadata.get("article_date") or metadata.get("date"),
+                        "best_similarity": similarity,
+                        "best_chunk": chunk_entry,
+                        "chunks": [chunk_entry],
+                    }
+                else:
+                    if not entry.get("article_id") and article_id:
+                        entry["article_id"] = article_id
+                    entry["chunks"].append(chunk_entry)
+                    if similarity > entry["best_similarity"]:
+                        entry["best_similarity"] = similarity
+                        entry["best_chunk"] = chunk_entry
+
+        ranked = sorted(doc_scores.values(), key=lambda item: item["best_similarity"], reverse=True)[:top_k]
+
+        from ingestion.loader import load_document
+
+        final_results: list[dict] = []
+        for item in ranked:
+            full_text = None
+            try:
+                source = item.get("source")
+                if source:
+                    doc_obj = load_document(source)
+                    full_text = doc_obj.get("content")
+            except Exception:
+                full_text = None
+
+            best_chunk = item.get("best_chunk", {})
+            final_results.append(
+                {
+                    "document_id": item.get("document_id"),
+                    "article_id": item.get("article_id"),
+                    "title": item.get("title", ""),
+                    "filename": item.get("filename", ""),
+                    "source": item.get("source", ""),
+                    "article_date": item.get("article_date"),
+                    "similarity_score": item.get("best_similarity", 0.0),
+                    "snippet": best_chunk.get("preview", ""),
+                    "chunk_preview": best_chunk.get("preview", ""),
+                    "content": full_text if full_text is not None else best_chunk.get("text", ""),
+                }
+            )
+
+        top_similarity = final_results[0]["similarity_score"] if final_results else 0.0
+        logger.info(
+            f"Retrieved {len(final_results)} documents for query. Top similarity: {top_similarity:.3f}"
+        )
+        return final_results
+
     except Exception as e:
-        logger.error(f"Failed to search by topic: {str(e)}")
+        logger.error(f"Failed to retrieve articles: {str(e)}")
         raise
 
 
-def filter_by_date(start_date: str, end_date: str) -> dict:
-    """Filter documents by date range.
-    
-    Retrieves documents published within the specified date range.
-    Note: Requires document metadata to include 'date' or 'published_date' field.
-    
-    Args:
-        start_date: Start date (ISO format: YYYY-MM-DD)
-        end_date: End date (ISO format: YYYY-MM-DD)
-        
-    Returns:
-        Dictionary with filtered documents and metadata
-        
-    Raises:
-        ValueError: If dates are invalid or start_date > end_date
-        RuntimeError: If collection is not initialized
-    """
+def search_by_topic(topic: str) -> dict:
+    """Legacy wrapper for semantic article search."""
+    results = search_articles(topic, top_k=10)
+    return {
+        "topic": topic,
+        "num_results": len(results),
+        "results": results,
+        "metadata": {
+            "search_type": "semantic",
+            "timestamp": datetime.now().isoformat(),
+        },
+    }
+
+
+def get_article(article_id: int) -> dict:
+    """Fetch a single article and return its metadata."""
+    if article_id is None:
+        raise ValueError("article_id cannot be empty")
+
+    try:
+        articles = _fetch_articles(
+            """
+            SELECT
+                article_id,
+                title,
+                content,
+                url,
+                article_date,
+                fk_topic_id AS topic_id,
+                created_at
+            FROM dimArticle
+            WHERE article_id = :article_id
+              AND content IS NOT NULL
+              AND content != ''
+            LIMIT 1
+            """,
+            {"article_id": int(article_id)},
+        )
+    except Exception as e:
+        logger.error(f"Failed to fetch article {article_id}: {str(e)}")
+        raise
+
+    if not articles:
+        return {
+            "article_id": int(article_id),
+            "found": False,
+            "metadata": {"timestamp": datetime.now().isoformat()},
+        }
+
+    article = articles[0]
+    article["found"] = True
+    article["metadata"]["timestamp"] = datetime.now().isoformat()
+    return article
+
+
+def filter_articles_by_date(start_date: str, end_date: str) -> dict:
+    """Filter SQL articles by the article_date field."""
     try:
         start = datetime.fromisoformat(start_date).date()
         end = datetime.fromisoformat(end_date).date()
     except ValueError as e:
         raise ValueError(f"Invalid date format. Expected ISO format (YYYY-MM-DD): {str(e)}")
-    
+
     if start > end:
         raise ValueError("start_date cannot be after end_date")
-    
-    collection = get_collection()
-    if collection is None:
-        raise RuntimeError(
-            "Collection not initialized. Please build the knowledge base first."
-        )
-    
-    logger.info(f"Filtering documents by date range: {start_date} to {end_date}")
-    
+
     try:
-        # Get all documents from collection
-        results = collection.get(
-            include=["documents", "metadatas"]
+        results = _fetch_articles(
+            """
+            SELECT
+                article_id,
+                title,
+                content,
+                url,
+                article_date,
+                fk_topic_id AS topic_id,
+                created_at
+            FROM dimArticle
+            WHERE article_date IS NOT NULL
+              AND article_date >= :start_date
+              AND article_date <= :end_date
+              AND content IS NOT NULL
+              AND content != ''
+            ORDER BY article_date DESC, article_id DESC
+            """,
+            {"start_date": start.isoformat(), "end_date": end.isoformat()},
         )
-        
-        filtered_documents = []
-        if results and results["documents"]:
-            docs = results["documents"]
-            metadatas = results["metadatas"] if results["metadatas"] else []
-            
-            for doc_text, metadata in zip(docs, metadatas):
-                # Check for date in metadata
-                doc_date_str = metadata.get("date") or metadata.get("published_date")
-                if not doc_date_str:
-                    continue
-                
-                try:
-                    doc_date = datetime.fromisoformat(doc_date_str).date()
-                    if start <= doc_date <= end:
-                        filtered_documents.append({
-                            "content": doc_text,
-                            "source": metadata.get("source", ""),
-                            "filename": metadata.get("filename", ""),
-                            "document_id": metadata.get("document_id", ""),
-                            "date": str(doc_date),
-                        })
-                except (ValueError, TypeError):
-                    pass
-        
-        logger.info(
-            f"Filtered {len(filtered_documents)} documents in date range: "
-            f"{start_date} to {end_date}"
-        )
-        
-        return {
-            "start_date": start_date,
-            "end_date": end_date,
-            "num_results": len(filtered_documents),
-            "results": filtered_documents,
-            "metadata": {
-                "filter_type": "date_range",
-                "timestamp": datetime.now().isoformat(),
-            },
-        }
-    
     except Exception as e:
-        logger.error(f"Failed to filter by date: {str(e)}")
+        logger.error(f"Failed to filter articles by date: {str(e)}")
         raise
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "num_results": len(results),
+        "results": results,
+        "metadata": {
+            "filter_type": "date_range",
+            "timestamp": datetime.now().isoformat(),
+        },
+    }
+
+
+def filter_by_date(start_date: str, end_date: str) -> dict:
+    """Legacy wrapper for SQL date filtering."""
+    return filter_articles_by_date(start_date, end_date)
 
 
 def count_keyword_mentions(keyword: str) -> dict:
-    """Count keyword mentions in corpus.
-    
-    Searches the corpus for occurrences of a keyword and returns
-    count statistics and document distribution.
-    
-    Args:
-        keyword: Keyword to search for (case-insensitive)
-        
-    Returns:
-        Dictionary with count, distribution, and matched chunks
-        
-    Raises:
-        ValueError: If keyword is empty
-        RuntimeError: If collection is not initialized
-    """
+    """Count keyword mentions in the SQL article corpus."""
     if not keyword or not keyword.strip():
         raise ValueError("Keyword cannot be empty")
-    
-    collection = get_collection()
-    if collection is None:
-        raise RuntimeError(
-            "Collection not initialized. Please build the knowledge base first."
-        )
-    
+
     keyword_lower = keyword.lower()
     logger.info(f"Counting mentions of keyword: {keyword}")
-    
+
     try:
-        # Get all documents from collection
-        results = collection.get(
-            include=["documents", "metadatas"]
+        articles = _fetch_articles(
+            """
+            SELECT
+                article_id,
+                title,
+                content,
+                url,
+                article_date,
+                fk_topic_id AS topic_id,
+                created_at
+            FROM dimArticle
+            WHERE content IS NOT NULL
+              AND content != ''
+            ORDER BY article_id DESC
+            """
         )
-        
+
         total_mentions = 0
-        document_distribution = {}
+        document_distribution: dict[str, dict[str, Any]] = {}
         matched_chunks = []
-        
-        if results and results["documents"]:
-            docs = results["documents"]
-            metadatas = results["metadatas"] if results["metadatas"] else []
-            
-            for i, (doc_text, metadata) in enumerate(zip(docs, metadatas)):
-                # Count occurrences
-                mentions = doc_text.lower().count(keyword_lower)
-                
-                if mentions > 0:
-                    total_mentions += mentions
-                    doc_id = metadata.get("document_id", "")
-                    filename = metadata.get("filename", "")
-                    
-                    if doc_id not in document_distribution:
-                        document_distribution[doc_id] = {
-                            "filename": filename,
-                            "mention_count": 0,
-                            "chunk_count": 0,
-                        }
-                    
-                    document_distribution[doc_id]["mention_count"] += mentions
-                    document_distribution[doc_id]["chunk_count"] += 1
-                    
-                    matched_chunks.append({
-                        "content_preview": doc_text[:200] + "..." if len(doc_text) > 200 else doc_text,
-                        "mention_count": mentions,
-                        "source": metadata.get("source", ""),
-                        "filename": filename,
-                        "document_id": doc_id,
-                    })
-        
-        # Sort by mention count
+
+        for article in articles:
+            content = article.get("content", "")
+            mentions = content.lower().count(keyword_lower)
+            if mentions <= 0:
+                continue
+
+            total_mentions += mentions
+            article_id = str(article.get("article_id", ""))
+            title = article.get("title", "")
+
+            if article_id not in document_distribution:
+                document_distribution[article_id] = {
+                    "filename": title,
+                    "mention_count": 0,
+                    "chunk_count": 0,
+                }
+
+            document_distribution[article_id]["mention_count"] += mentions
+            document_distribution[article_id]["chunk_count"] += 1
+            matched_chunks.append(
+                {
+                    "content_preview": content[:200] + "..." if len(content) > 200 else content,
+                    "mention_count": mentions,
+                    "source": article.get("url", ""),
+                    "filename": title,
+                    "document_id": article_id,
+                    "article_date": article.get("article_date"),
+                }
+            )
+
         matched_chunks = sorted(
             matched_chunks,
-            key=lambda x: x["mention_count"],
-            reverse=True
-        )[:20]  # Top 20
-        
+            key=lambda item: item["mention_count"],
+            reverse=True,
+        )[:20]
+
         logger.info(
             f"Found {total_mentions} mentions of keyword '{keyword}' "
-            f"across {len(document_distribution)} documents"
+            f"across {len(document_distribution)} articles"
         )
-        
+
         return {
             "keyword": keyword,
             "total_mentions": total_mentions,
@@ -314,7 +441,7 @@ def count_keyword_mentions(keyword: str) -> dict:
                 "timestamp": datetime.now().isoformat(),
             },
         }
-    
+
     except Exception as e:
         logger.error(f"Failed to count keyword mentions: {str(e)}")
         raise
@@ -406,45 +533,53 @@ def corpus_statistics() -> dict:
 
 def create_default_tools() -> ToolRegistry:
     """Create and populate the default tool registry.
-    
+
     Default tools include:
-    - search_by_topic: Search documents by topic using semantic similarity
-    - filter_by_date: Filter documents by date range
-    - count_keyword_mentions: Count keyword mentions in corpus
+    - search_articles: Retrieve relevant article chunks by semantic similarity
+    - get_article: Fetch a single article by id
+    - filter_articles_by_date: Filter articles by article_date
+    - count_keyword_mentions: Count keyword mentions in the SQL corpus
     - corpus_statistics: Return corpus metadata and statistics
-    
+
     Returns:
         Populated ToolRegistry instance
     """
     registry = ToolRegistry()
-    
+
     registry.register(
-        name="search_by_topic",
-        func=search_by_topic,
+        name="search_articles",
+        func=search_articles,
         description=(
-            "Search documents by topic using semantic similarity. "
-            "Returns top 10 most relevant documents for the given topic."
+            "Retrieve relevant article chunks by semantic similarity. "
+            "Returns the most relevant article passages for a query."
         ),
     )
-    
+
     registry.register(
-        name="filter_by_date",
-        func=filter_by_date,
+        name="get_article",
+        func=get_article,
         description=(
-            "Filter documents by date range. "
-            "Requires ISO format dates (YYYY-MM-DD)."
+            "Fetch a single article by article_id and return its metadata and content."
         ),
     )
-    
+
+    registry.register(
+        name="filter_articles_by_date",
+        func=filter_articles_by_date,
+        description=(
+            "Filter articles by article_date using ISO format dates in YYYY-MM-DD."
+        ),
+    )
+
     registry.register(
         name="count_keyword_mentions",
         func=count_keyword_mentions,
         description=(
-            "Count keyword mentions in corpus. "
-            "Returns total mentions, document distribution, and top chunks."
+            "Count keyword mentions in the SQL corpus. "
+            "Returns totals, distribution, and top matching articles."
         ),
     )
-    
+
     registry.register(
         name="corpus_statistics",
         func=corpus_statistics,
@@ -453,6 +588,6 @@ def create_default_tools() -> ToolRegistry:
             "chunk count, size metrics, and source distribution."
         ),
     )
-    
-    logger.info("Default tool registry created with 4 tools")
+
+    logger.info("Default tool registry created with 5 tools")
     return registry

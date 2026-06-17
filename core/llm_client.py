@@ -102,7 +102,8 @@ class LMStudioClient:
         temperature: float = 0.7,
         top_p: float = 0.95,
         top_k: int = 40,
-        max_tokens: int = 512,
+        max_tokens: Optional[int] = 512,
+        stop: Optional[list[str]] = None,
     ) -> LLMResponse:
         """Generate text completion for a prompt.
 
@@ -111,7 +112,8 @@ class LMStudioClient:
             temperature: Sampling temperature (0.0-2.0)
             top_p: Nucleus sampling parameter (0.0-1.0)
             top_k: Top-k sampling parameter (note: not passed to API, kept for compatibility)
-            max_tokens: Maximum tokens to generate
+            max_tokens: Maximum tokens to generate, or None to omit the cap
+            stop: Optional list of stop sequences to terminate generation
 
         Returns:
             LLMResponse with generated text and metadata
@@ -122,14 +124,18 @@ class LMStudioClient:
         start_time = time.time()
 
         def _call_api():
-            return self.client.completions.create(
-                model=self.model_name,
-                prompt=prompt,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                timeout=self.timeout,
-            )
+            request_kwargs = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "temperature": temperature,
+                "top_p": top_p,
+                "timeout": self.timeout,
+            }
+            if max_tokens is not None:
+                request_kwargs["max_tokens"] = max_tokens
+            if stop is not None:
+                request_kwargs["stop"] = stop
+            return self.client.completions.create(**request_kwargs)
 
         try:
             response = self._execute_with_retry(_call_api)

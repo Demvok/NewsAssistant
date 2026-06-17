@@ -8,15 +8,25 @@ Main user interface for multi-turn conversation with support for:
 - Chat history and session state management
 """
 
-import streamlit as st
+import json
 import logging
+import re
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
+
+import streamlit as st
 
 from config import settings
+from core.agents import run_multi_agent_pipeline
 from core.llm_client import LMStudioClient
-from core.schemas import ChatMessage
-from core.rag import retrieve_context
+from core.react import run_react_loop
+from core.tools import (
+    create_default_tools,
+    count_keyword_mentions,
+    filter_articles_by_date,
+    get_article,
+    search_articles,
+)
 from core.utils import setup_logging
 
 # Configure logging
@@ -43,7 +53,7 @@ if "multi_agent_enabled" not in st.session_state:
     st.session_state.multi_agent_enabled = False
     
 if "tool_calling_enabled" not in st.session_state:
-    st.session_state.tool_calling_enabled = False
+    st.session_state.tool_calling_enabled = True
     
 if "temperature" not in st.session_state:
     st.session_state.temperature = settings.temperature
@@ -202,46 +212,69 @@ def format_rag_context(retrieved_chunks: list) -> str:
 def build_prompt(
     user_message: str,
     rag_enabled: bool,
-    retrieved_chunks: Optional[list] = None,
+    retrieved_chunks: list[dict],
+    tool_context_text: str,
 ) -> str:
-    """Build the complete prompt for the LLM.
-    
-    Args:
-        user_message: The user's query
-        rag_enabled: Whether RAG is enabled
-        retrieved_chunks: Retrieved context chunks (if RAG enabled)
-        
-    Returns:
-        Formatted prompt string
-    """
-    system_prompt = ("""
-        You are an AI News Intelligence Assistant specialized in analyzing news articles.
-        You focus on three key themes: green energy, the U.S. trade war, and social media censorship.
-        Provide analytical, grounded responses based on the provided context when available.
-        When answering, cite specific sources from the retrieved documents.
-        Answer in the language of the user's query, and maintain a professional and informative tone.
-    """)
-    
-    prompt = f"System: {system_prompt}\n\n"
-    
+    """Build the standard generation prompt for non-ReAct responses."""
     if rag_enabled and retrieved_chunks:
-        prompt += f"{format_rag_context(retrieved_chunks)}\n\n"
-    
-    # Add recent chat history for context
-    history_context = ""
-    recent_history = st.session_state.chat_history[-4:-1] if len(st.session_state.chat_history) > 1 else []
-    if recent_history:
-        history_context = "Recent conversation:\n"
-        for msg in recent_history:
-            role = "User" if msg.get("role") == "user" else "Assistant"
-            content = msg.get("content", "")
-            if isinstance(content, dict):
-                content = content.get("answer", "")
-            history_context += f"{role}: {content}\n"
-        prompt += f"{history_context}\n"
-    
-    prompt += f"User: {user_message}\nAssistant:"
-    return prompt
+        context_text = format_rag_context(retrieved_chunks)
+    elif tool_context_text:
+        context_text = tool_context_text
+    else:
+        context_text = ""
+
+    if context_text:
+        return (
+            "You are a helpful news intelligence assistant. Use the provided context when relevant.\n\n"
+            f"Context:\n{context_text}\n\n"
+            f"User question: {user_message}\n\n"
+            "Answer clearly and concisely using only the available information."
+        )
+
+    return (
+        "You are a helpful news intelligence assistant.\n\n"
+        f"User question: {user_message}\n\n"
+        "Answer clearly and concisely."
+    )
+
+
+def _get_available_tools() -> dict[str, dict]:
+    """Get tool descriptions for the ReAct loop to choose from."""
+    return {
+        "search_articles": {
+            "description": "Search for relevant articles using semantic similarity. Use when you need to find articles related to a topic or query.",
+            "params": ["query (str)", "top_k (int, optional, default=5)"],
+        },
+        "get_article": {
+            "description": "Fetch a specific article by its ID and get its full content and metadata.",
+            "params": ["article_id (int)"],
+        },
+        "filter_articles_by_date": {
+            "description": "Find articles published within a specific date range.",
+            "params": ["start_date (str, ISO format YYYY-MM-DD)", "end_date (str, ISO format YYYY-MM-DD)"],
+        },
+        "count_keyword_mentions": {
+            "description": "Count how many times a keyword appears in the article corpus.",
+            "params": ["keyword (str)"],
+        },
+    }
+
+
+def _render_react_trace_from_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert the ReAct module steps into a compact trace format for the UI."""
+    trace = []
+    for step in steps:
+        trace.append(
+            {
+                "thought": step.get("thought", ""),
+                "action": step.get("action", ""),
+                "tool": step.get("tool_name"),
+                "input": step.get("tool_input", {}),
+                "observation": step.get("observation", ""),
+            }
+        )
+    return trace
+
 
 
 def generate_response(
@@ -255,22 +288,7 @@ def generate_response(
     top_k: int,
     top_k_retrieval: int,
 ) -> dict:
-    """Generate an AI response to the user message.
-    
-    Args:
-        user_message: The user's query
-        llm_client: LM Studio client for generation
-        rag_enabled: Whether to use RAG
-        multi_agent_enabled: Whether to use multi-agent reasoning
-        tool_calling_enabled: Whether to enable tool calling
-        temperature: Generation temperature
-        top_p: Nucleus sampling parameter
-        top_k: Top-k sampling parameter
-        top_k_retrieval: Number of chunks to retrieve
-        
-    Returns:
-        Response dictionary with answer and metadata
-    """
+    """Generate an AI response to the user message."""
     response_data = {
         "answer": "",
         "retrieved_chunks": [],
@@ -278,12 +296,12 @@ def generate_response(
         "tool_calls": [],
         "error": None,
     }
-    
+
     try:
-        # Step 1: Retrieve context if RAG is enabled
+        retrieved_chunks = []
         if rag_enabled:
             try:
-                retrieved_chunks = retrieve_context(
+                retrieved_chunks = search_articles(
                     query=user_message,
                     top_k=top_k_retrieval,
                 )
@@ -291,37 +309,58 @@ def generate_response(
                 logger.info(f"Retrieved {len(retrieved_chunks)} chunks")
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {str(e)}")
-                response_data["retrieved_chunks"] = []
-        
-        # Step 2: Build prompt with context
+                retrieved_chunks = []
+
+        if tool_calling_enabled:
+            logger.info("Executing ReAct reasoning loop")
+            react_output = run_react_loop(
+                query=user_message,
+                llm_client=llm_client,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                max_iterations=5,
+                retrieved_context=retrieved_chunks,
+            )
+            response_data["answer"] = react_output.get("answer", "")
+            response_data["agent_trace"] = _render_react_trace_from_steps(react_output.get("steps", []))
+            response_data["tool_calls"] = react_output.get("tool_calls", [])
+            response_data["error"] = react_output.get("error")
+            logger.info(f"ReAct completed with {len(response_data['tool_calls'])} tool calls")
+            return response_data
+
+        # Handle multi-agent mode
+        if multi_agent_enabled:
+            logger.info("Executing multi-agent pipeline")
+            if retrieved_chunks:
+                logger.info(f"Retrieved {len(retrieved_chunks)} chunks for agents")
+
+            agent_output = run_multi_agent_pipeline(user_message, context=retrieved_chunks)
+            response_data["agent_trace"] = agent_output.get("traces", [])
+            response_data["answer"] = agent_output.get("final_answer", "")
+            if agent_output.get("error_message"):
+                response_data["error"] = agent_output.get("error_message")
+            logger.info(f"Multi-agent response generated: {len(response_data['answer'])} chars")
+            return response_data
+
+        # Handle standard RAG mode
+        tool_context_text = ""
+        if retrieved_chunks:
+            tool_context_text = json.dumps(retrieved_chunks, ensure_ascii=False, default=str, indent=2)
+
         prompt = build_prompt(
             user_message=user_message,
             rag_enabled=rag_enabled,
-            retrieved_chunks=response_data["retrieved_chunks"],
+            retrieved_chunks=retrieved_chunks,
+            tool_context_text=tool_context_text,
         )
-        
-        # Step 3: Generate response (placeholder for multi-agent and tool calling)
-        # Note: These are stubbed for now as the agents and tools modules are not fully implemented
-        if multi_agent_enabled:
-            # Placeholder for multi-agent pipeline
-            response_data["agent_trace"] = [
-                {"agent": "Analyzer", "reasoning": "Analyzing the query and retrieved context..."},
-                {"agent": "Critic", "reasoning": "Evaluating the analysis for accuracy..."},
-                {"agent": "Synthesizer", "reasoning": "Synthesizing the final answer..."},
-            ]
-            logger.debug("Multi-agent mode enabled (placeholder)")
-        
-        if tool_calling_enabled:
-            # Placeholder for tool calling
-            response_data["tool_calls"] = []
-            logger.debug("Tool calling mode enabled (placeholder)")
-        
-        # Generate the actual response
+
         try:
             llm_response = llm_client.complete(
                 prompt=prompt,
                 temperature=temperature,
                 top_p=top_p,
+                top_k=top_k,
                 max_tokens=settings.max_tokens,
             )
             response_data["answer"] = llm_response.text.strip()
@@ -334,13 +373,13 @@ def generate_response(
             response_data["error"] = error_msg
             response_data["answer"] = f"❌ {error_msg}"
             logger.error(error_msg)
-    
+
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
         response_data["error"] = error_msg
         response_data["answer"] = f"❌ {error_msg}"
         logger.error(error_msg)
-    
+
     return response_data
 
 
