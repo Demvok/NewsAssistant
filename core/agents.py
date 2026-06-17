@@ -1,20 +1,18 @@
-"""Multi-agent reasoning module with LangGraph.
+"""Multi-agent reasoning module with LangGraph and nested ReAct cycles.
 
-Implements three specialized agents for news intelligence analysis:
-- Journalist: Initial analysis and answer formation
-- Fact Checker: Verification and critique of the answer
-- Editor: Synthesis of feedback into final balanced response
-
-Uses LangGraph for state management, control flow, and trace tracking.
+Each node in the graph now runs its own ReAct loop so the journalist,
+fact checker, and editor can all inspect context, call tools, and then
+hand their results to the next stage.
 """
 
 import logging
-from typing import TypedDict, Any
+from typing import Any, NotRequired, TypedDict
 from datetime import datetime
 
 from langgraph.graph import StateGraph, START, END
 from config import settings
 from core.llm_client import get_llm_client
+from core.react import run_react_loop
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +26,10 @@ class AgentTrace(TypedDict):
     output_text: str
     reasoning: str
     timestamp: str
+    mode: NotRequired[str]
+    steps: NotRequired[list[dict[str, Any]]]
+    tool_calls: NotRequired[list[dict[str, Any]]]
+    error: NotRequired[str]
 
 
 class AgentState(TypedDict):
@@ -35,6 +37,11 @@ class AgentState(TypedDict):
 
     query: str
     context: list[dict]
+    llm_client: Any
+    temperature: float
+    top_p: float
+    top_k: int
+    max_iterations: int
     journalist_response: str
     journalist_reasoning: str
     fact_checker_critique: str
@@ -63,6 +70,67 @@ Your responsibilities:
 Respond concisely and analytically. Be direct and evidence-based."""
 
 
+def _build_context_summary(context: list[dict], limit: int = 5, snippet_length: int = 700) -> str:
+    """Format retrieved context for agent prompts."""
+    if not context:
+        return ""
+
+    lines = []
+    for index, item in enumerate(context[:limit], 1):
+        content = item.get("content", "")[:snippet_length]
+        source = item.get("source") or item.get("filename") or "Unknown"
+        similarity = item.get("similarity_score", item.get("similarity", 0))
+        lines.append(f"{index}. [{source}] similarity={similarity:.3f}")
+        lines.append(content)
+
+    return "\n".join(lines)
+
+
+def _run_agent_cycle(
+    *,
+    agent_name: str,
+    role: str,
+    request_text: str,
+    context: list[dict],
+    llm_client: Any,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    max_iterations: int,
+    agent_instructions: str,
+    synthesis_instructions: str,
+) -> AgentTrace:
+    """Execute one ReAct-backed agent cycle and package the result."""
+    react_output = run_react_loop(
+        query=request_text,
+        llm_client=llm_client,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        max_iterations=max_iterations,
+        retrieved_context=context,
+        agent_name=agent_name,
+        agent_role=role,
+        agent_instructions=agent_instructions,
+        synthesis_instructions=synthesis_instructions,
+    )
+
+    output_text = react_output.get("answer", "")
+    trace: AgentTrace = {
+        "agent_name": agent_name,
+        "role": role,
+        "input_text": request_text,
+        "output_text": output_text,
+        "reasoning": agent_instructions.strip() or f"ReAct cycle for {agent_name}",
+        "timestamp": datetime.now().isoformat(),
+        "mode": react_output.get("mode", "react"),
+        "steps": react_output.get("steps", []),
+        "tool_calls": react_output.get("tool_calls", []),
+        "error": react_output.get("error") or "",
+    }
+    return trace
+
+
 def journalist_node(state: AgentState) -> AgentState:
     """Journalist agent: Initial analysis and answer formation.
     
@@ -78,61 +146,42 @@ def journalist_node(state: AgentState) -> AgentState:
     try:
         query = state["query"]
         context = state.get("context", [])
-        
-        # Build context string from retrieval results
-        context_str = ""
-        if context:
-            context_str = "\n\nRetrieved context:\n"
-            for i, item in enumerate(context[:5], 1):
-                content = item.get("content", "")[:300]
-                source = item.get("source", "Unknown")
-                context_str += f"{i}. [{source}]: {content}\n"
-        
-        guidelines = """1. Analyze the query comprehensively
-                        2. Use retrieved context as the primary source of information
-                        3. Form a clear, well-supported initial answer
-                        4. Identify key claims and evidence
-                        5. Note any gaps or uncertainties in the corpus"""
-        
-        system_prompt = _create_system_prompt("Journalist", guidelines)
-        
-        user_prompt = f"""Query: {query}
-                        {context_str}
+        llm_client = state["llm_client"]
+        temperature = state["temperature"]
+        top_p = state["top_p"]
+        top_k = state["top_k"]
+        max_iterations = state.get("max_iterations", 4)
 
-                        Provide a comprehensive initial answer to this query based on the retrieved context. 
-                        Structure your response with:
-                        1. Main answer/findings
-                        2. Supporting evidence from the corpus
-                        3. Key points and implications"""
-        
-        llm_client = get_llm_client(
-            base_url=settings.lm_studio_base_url,
-            model_name=settings.chat_model,
-            timeout=settings.request_timeout,
+        context_summary = _build_context_summary(context)
+        request_text = f"""Original query:
+{query}
+
+Corpus context:
+{context_summary or '(no retrieved context)'}
+
+Investigate the query as a news journalist. Use the corpus first, call tools when useful, and produce an initial answer that is as complete as the normal ReAct response.
+Prioritize factual grounding, identify the strongest evidence, and note any gaps that need verification."""
+
+        agent_instructions = (
+            "Journalist cycle: develop the first full answer, inspect retrieved context, use tools to expand evidence, "
+            "and keep the response grounded in the corpus."
         )
-        
-        response = llm_client.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=settings.temperature,
-            top_p=settings.top_p,
-            **({"max_tokens": settings.max_tokens} if settings.max_tokens is not None else {}),
-        )
-        
-        journalist_response = response.text
-        
-        # Add trace
-        trace = AgentTrace(
+
+        trace = _run_agent_cycle(
             agent_name="Journalist",
             role="News Analyst",
-            input_text=query,
-            output_text=journalist_response,
-            reasoning="Initial comprehensive analysis based on corpus context",
-            timestamp=datetime.now().isoformat(),
+            request_text=request_text,
+            context=context,
+            llm_client=llm_client,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            max_iterations=max_iterations,
+            agent_instructions=agent_instructions,
+            synthesis_instructions="Write the journalist's initial answer directly for downstream verification.",
         )
-        
+
+        journalist_response = trace["output_text"]
         state["journalist_response"] = journalist_response
         state["traces"].append(trace)
         
@@ -162,66 +211,44 @@ def fact_checker_node(state: AgentState) -> AgentState:
         query = state["query"]
         journalist_response = state.get("journalist_response", "")
         context = state.get("context", [])
-        
-        context_str = ""
-        if context:
-            context_str = "\n\nAvailable corpus context:\n"
-            for i, item in enumerate(context[:5], 1):
-                content = item.get("content", "")[:200]
-                source = item.get("source", "Unknown")
-                context_str += f"{i}. [{source}]: {content}\n"
-        
-        guidelines = """1. Verify claims against provided context
-2. Identify unsupported assertions
-3. Check for logical consistency
-4. Identify potential biases or gaps
-5. Highlight evidence quality issues"""
-        
-        system_prompt = _create_system_prompt("Fact Checker", guidelines)
-        
-        user_prompt = f"""Original query: {query}
+        llm_client = state["llm_client"]
+        temperature = state["temperature"]
+        top_p = state["top_p"]
+        top_k = state["top_k"]
+        max_iterations = state.get("max_iterations", 4)
 
-Journalist's answer:
+        context_summary = _build_context_summary(context, snippet_length=500)
+        request_text = f"""Original query:
+{query}
+
+Journalist draft:
 {journalist_response}
-{context_str}
 
-Critique this analysis by:
-1. Verifying each major claim against the corpus
-2. Identifying any unsupported statements
-3. Assessing logical consistency
-4. Noting gaps or areas lacking evidence
-5. Providing specific corrections or clarifications needed
+Corpus context:
+{context_summary or '(no retrieved context)'}
 
-Be critical but fair. Focus on evidence quality and accuracy."""
-        
-        llm_client = get_llm_client(
-            base_url=settings.lm_studio_base_url,
-            model_name=settings.chat_model,
-            timeout=settings.request_timeout,
+Act as a fact checker. Inspect the journalist draft claim by claim, use tools to verify or refute important points, and produce a strict but fair critique with concrete corrections."""
+
+        agent_instructions = (
+            "Fact-checker cycle: verify the journalist answer against retrieved context, call tools for supporting evidence, "
+            "and identify unsupported statements or missing nuance."
         )
-        
-        response = llm_client.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=settings.temperature,
-            top_p=settings.top_p,
-            **({"max_tokens": settings.max_tokens} if settings.max_tokens is not None else {}),
-        )
-        
-        critique = response.text
-        
-        # Add trace
-        trace = AgentTrace(
+
+        trace = _run_agent_cycle(
             agent_name="Fact Checker",
             role="Verification Specialist",
-            input_text=journalist_response[:200],
-            output_text=critique,
-            reasoning="Critical verification against corpus evidence",
-            timestamp=datetime.now().isoformat(),
+            request_text=request_text,
+            context=context,
+            llm_client=llm_client,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            max_iterations=max_iterations,
+            agent_instructions=agent_instructions,
+            synthesis_instructions="Write a critique that downstream synthesis can fold into the final answer.",
         )
-        
+
+        critique = trace["output_text"]
         state["fact_checker_critique"] = critique
         state["traces"].append(trace)
         
@@ -251,61 +278,48 @@ def editor_node(state: AgentState) -> AgentState:
         query = state["query"]
         journalist_response = state.get("journalist_response", "")
         critique = state.get("fact_checker_critique", "")
-        
-        guidelines = """1. Synthesize journalist's analysis with fact checker's critique
-2. Maintain evidence-based accuracy
-3. Present balanced perspective
-4. Resolve contradictions logically
-5. Produce clear, well-structured final answer
-6. Indicate confidence levels and areas of uncertainty"""
-        
-        system_prompt = _create_system_prompt("Editor", guidelines)
-        
-        user_prompt = f"""Original query: {query}
+        context = state.get("context", [])
+        llm_client = state["llm_client"]
+        temperature = state["temperature"]
+        top_p = state["top_p"]
+        top_k = state["top_k"]
+        max_iterations = state.get("max_iterations", 4)
 
-Initial analysis from journalist:
+        context_summary = _build_context_summary(context, snippet_length=450)
+        request_text = f"""Original query:
+{query}
+
+Journalist analysis:
 {journalist_response}
 
-Critique from fact checker:
+Fact-check critique:
 {critique}
 
-Create a final synthesized answer that:
-1. Incorporates the journalist's key findings
-2. Addresses all critique points from the fact checker
-3. Maintains logical consistency and evidence-based reasoning
-4. Is well-organized and clear
-5. Explicitly notes areas of certainty vs. uncertainty
+Corpus context:
+{context_summary or '(no retrieved context)'}
 
-Produce a balanced, final answer suitable for publishing."""
-        
-        llm_client = get_llm_client(
-            base_url=settings.lm_studio_base_url,
-            model_name=settings.chat_model,
-            timeout=settings.request_timeout,
+Act as the editor. Synthesize the analysis and critique into the exact answer the user needs. Resolve conflicts, preserve uncertainty, and keep the final answer direct and publication-ready."""
+
+        agent_instructions = (
+            "Editor cycle: synthesize the journalist draft and the fact-checker's critique into a final answer. "
+            "Use tools only if needed to close a remaining factual gap."
         )
-        
-        response = llm_client.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=max(0.5, settings.temperature - 0.2),
-            top_p=settings.top_p,
-            **({"max_tokens": settings.max_tokens} if settings.max_tokens is not None else {}),
-        )
-        
-        final_answer = response.text
-        
-        # Add trace
-        trace = AgentTrace(
+
+        trace = _run_agent_cycle(
             agent_name="Editor",
             role="Synthesis & Refinement",
-            input_text=f"Journalist + Critique ({len(journalist_response) + len(critique)} chars)",
-            output_text=final_answer,
-            reasoning="Synthesis of analysis and critique into final answer",
-            timestamp=datetime.now().isoformat(),
+            request_text=request_text,
+            context=context,
+            llm_client=llm_client,
+            temperature=max(0.5, temperature - 0.2),
+            top_p=top_p,
+            top_k=top_k,
+            max_iterations=max_iterations,
+            agent_instructions=agent_instructions,
+            synthesis_instructions="Produce the final user-facing answer from the prior agent outputs.",
         )
-        
+
+        final_answer = trace["output_text"]
         state["editor_synthesis"] = final_answer
         state["traces"].append(trace)
         
@@ -359,7 +373,12 @@ def _get_graph():
 
 def run_multi_agent_pipeline(
     query: str,
-    context: list[dict] = None,
+    context: list[dict] | None = None,
+    llm_client: Any = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    max_iterations: int = 4,
 ) -> dict:
     """Run multi-agent reasoning pipeline.
     
@@ -385,11 +404,22 @@ def run_multi_agent_pipeline(
         raise ValueError("Query cannot be empty")
     
     logger.info(f"Starting multi-agent pipeline for query: {query[:100]}...")
+
+    client = llm_client or get_llm_client(
+        base_url=settings.lm_studio_base_url,
+        model_name=settings.chat_model,
+        timeout=settings.request_timeout,
+    )
     
     # Initialize state
     initial_state: AgentState = {
         "query": query,
         "context": context or [],
+        "llm_client": client,
+        "temperature": temperature if temperature is not None else settings.temperature,
+        "top_p": top_p if top_p is not None else settings.top_p,
+        "top_k": top_k if top_k is not None else settings.top_k,
+        "max_iterations": max_iterations,
         "journalist_response": "",
         "journalist_reasoning": "",
         "fact_checker_critique": "",
@@ -410,7 +440,9 @@ def run_multi_agent_pipeline(
             "final_answer": result["editor_synthesis"],
             "journalist_response": result["journalist_response"],
             "fact_checker_critique": result["fact_checker_critique"],
+            "editor_synthesis": result["editor_synthesis"],
             "traces": result["traces"],
+            "agent_trace": result["traces"],
             "error_message": result["error_message"],
         }
         
@@ -421,6 +453,7 @@ def run_multi_agent_pipeline(
             "journalist_response": "",
             "fact_checker_critique": "",
             "traces": initial_state["traces"],
+            "agent_trace": initial_state["traces"],
             "error_message": str(e),
         }
 

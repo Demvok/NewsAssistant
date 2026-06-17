@@ -86,6 +86,9 @@ def _build_prompt(
     steps: list[dict[str, Any]],
     tool_registry: ToolRegistry,
     retrieved_context: Optional[list[dict[str, Any]]] = None,
+    agent_name: str = "ReAct Assistant",
+    agent_role: str = "analyst",
+    agent_instructions: str = "",
 ) -> str:
     history_lines: list[str] = []
     for index, step in enumerate(steps, 1):
@@ -113,7 +116,9 @@ def _build_prompt(
             context_lines.append(content)
         context_text = "\n".join(context_lines)
 
-    return f"""You are a ReAct assistant for a news corpus.
+    instructions_block = f"\n\nAgent instructions:\n{agent_instructions}" if agent_instructions else ""
+
+    return f"""You are {agent_name}, a {agent_role} for a news corpus.{instructions_block}
 
             Available tools:
             {_build_tool_catalog(tool_registry)}
@@ -182,6 +187,9 @@ def _build_synthesis_prompt(
     steps: list[dict[str, Any]],
     retrieved_context: Optional[list[dict[str, Any]]] = None,
     draft_answer: str = "",
+    agent_name: str = "ReAct Assistant",
+    agent_role: str = "analyst",
+    synthesis_instructions: str = "",
 ) -> str:
     step_lines: list[str] = []
     for index, step in enumerate(steps, 1):
@@ -209,7 +217,9 @@ def _build_synthesis_prompt(
     step_text = "\n".join(step_lines) if step_lines else "(no tool steps were taken)"
     context_text = "\n".join(context_lines) if context_lines else "(no retrieved context)"
 
-    return f"""You are writing the final answer to the user.
+    instructions_block = f"\n\nSynthesis instructions:\n{synthesis_instructions}" if synthesis_instructions else ""
+
+    return f"""You are {agent_name}, a {agent_role}, writing the final answer to the user.{instructions_block}
 
 Original question:
 {query}
@@ -239,12 +249,18 @@ def _synthesize_final_answer(
     draft_answer: str = "",
     temperature: float = 0.2,
     top_p: float = 0.9,
+    agent_name: str = "ReAct Assistant",
+    agent_role: str = "analyst",
+    synthesis_instructions: str = "",
 ) -> str:
     prompt = _build_synthesis_prompt(
         query=query,
         steps=steps,
         retrieved_context=retrieved_context,
         draft_answer=draft_answer,
+        agent_name=agent_name,
+        agent_role=agent_role,
+        synthesis_instructions=synthesis_instructions,
     )
     response = llm_client.complete(
         prompt=prompt,
@@ -296,6 +312,10 @@ def run_react_loop(
     max_iterations: int = 4,
     tool_registry: Optional[ToolRegistry] = None,
     retrieved_context: Optional[list[dict[str, Any]]] = None,
+    agent_name: str = "ReAct Assistant",
+    agent_role: str = "analyst",
+    agent_instructions: str = "",
+    synthesis_instructions: str = "",
 ) -> dict[str, Any]:
     """Run a ReAct loop and return structured output for the chat page."""
     registry = tool_registry or create_default_tools()
@@ -335,7 +355,15 @@ def run_react_loop(
 
     steps: list[dict[str, Any]] = []
     for _iteration in range(1, max_iterations + 1):
-        prompt = _build_prompt(query, steps, registry, retrieved_context=retrieved_context)
+        prompt = _build_prompt(
+            query,
+            steps,
+            registry,
+            retrieved_context=retrieved_context,
+            agent_name=agent_name,
+            agent_role=agent_role,
+            agent_instructions=agent_instructions,
+        )
         try:
             response = llm_client.complete(
                 prompt=prompt,
@@ -373,6 +401,9 @@ def run_react_loop(
                     steps=steps,
                     retrieved_context=retrieved_context,
                     draft_answer=final,
+                    agent_name=agent_name,
+                    agent_role=agent_role,
+                    synthesis_instructions=synthesis_instructions,
                 )
                 result.answer = synthesized_answer or final or thought or "Unable to answer."
             except Exception as exc:

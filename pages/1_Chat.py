@@ -161,27 +161,27 @@ def render_chat_history():
                 if isinstance(content, dict) and "retrieved_chunks" in content and content["retrieved_chunks"]:
                     with st.expander("📚 Retrieved Context", expanded=False):
                         for i, chunk in enumerate(content["retrieved_chunks"], 1):
-                            source = chunk.get("filename", "Unknown Source")
-                            score = chunk.get("similarity_score", 0)
-                            content_snippet = chunk.get("content", "")[:200] + "..." if len(chunk.get("content", "")) > 200 else chunk.get("content", "")
-
-                            st.markdown(f"**Chunk {i}** | Source: `{source}` | Similarity: **{score:.3f}**")
-                            st.code(content_snippet, language="text")
+                            st.markdown(f"**Chunk {i}**")
+                            st.code(
+                                json.dumps(_summarize_retrieved_chunk(chunk), ensure_ascii=False, indent=2),
+                                language="json",
+                            )
                 
                 # Display agent trace if available
                 if isinstance(content, dict) and "agent_trace" in content and content["agent_trace"]:
-                    with st.expander("🔗 Agent Reasoning Trace", expanded=False):
-                        for step in content["agent_trace"]:
-                            st.write(f"**Thought**: {step.get('thought', '')}\n\n**Action**: {step.get('action', '')} (**Tool**: {step.get('tool', 'N/A')})")
+                    _render_agent_trace(content["agent_trace"])
                 
                 # Display tool calls if available
                 if isinstance(content, dict) and "tool_calls" in content and content["tool_calls"]:
                     with st.expander("🔧 Tool Calls", expanded=False):
                         for tool_call in content["tool_calls"]:
+                            agent_name = tool_call.get("agent_name")
                             name = tool_call.get('name', 'unknown')
                             args = tool_call.get('args', {})
                             result = tool_call.get('result', '')
 
+                            if agent_name:
+                                st.markdown(f"**Agent**: {agent_name}")
                             st.markdown(f"**Tool Called**: `{name}`")
                             st.markdown("**Parameters:**")
                             # Display arguments clearly, using code block for structure if complex
@@ -284,6 +284,94 @@ def _render_react_trace_from_steps(steps: list[dict[str, Any]]) -> list[dict[str
     return trace
 
 
+def _summarize_retrieved_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
+    """Project a retrieved chunk down to the fields shown in chat."""
+    return {
+        "article_id": chunk.get("article_id"),
+        "similarity_score": chunk.get("similarity_score", 0.0),
+        "snippet": chunk.get("snippet") or chunk.get("chunk_preview") or chunk.get("content", "")[:200],
+    }
+
+
+def _collect_tool_calls(agent_trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Flatten tool calls from grouped agent traces for the UI."""
+    tool_calls: list[dict[str, Any]] = []
+    for item in agent_trace or []:
+        for tool_call in item.get("tool_calls", []) or []:
+            tool_calls.append(
+                {
+                    "agent_name": item.get("agent_name", "Agent"),
+                    "role": item.get("role", ""),
+                    **tool_call,
+                }
+            )
+    return tool_calls
+
+
+def _render_agent_cycle(cycle: dict[str, Any], index: int) -> None:
+    """Render one agent ReAct cycle with its nested reasoning steps."""
+    agent_name = cycle.get("agent_name", f"Agent {index}")
+    role = cycle.get("role", "")
+    mode = cycle.get("mode", "react")
+    answer = cycle.get("output_text", "")
+    reasoning = cycle.get("reasoning", "")
+    error = cycle.get("error", "")
+    steps = cycle.get("steps", []) or []
+    tool_calls = cycle.get("tool_calls", []) or []
+
+    header = f"{index}. {agent_name}"
+    if role:
+        header += f" · {role}"
+    if mode:
+        header += f" · {mode}"
+
+    with st.expander(header, expanded=index == 1):
+        st.markdown(answer or "No answer returned.")
+        if reasoning:
+            st.caption(reasoning)
+        if error:
+            st.warning(error)
+
+        if steps:
+            st.markdown("**ReAct Steps**")
+            for step_index, step in enumerate(steps, 1):
+                st.markdown(f"**Step {step_index}**")
+                st.markdown(f"**Thought:** {step.get('thought', '')}")
+                st.markdown(f"**Action:** {step.get('action', '')}")
+                if step.get("tool_name"):
+                    st.markdown(f"**Tool:** {step.get('tool_name')}")
+                if step.get("tool_input"):
+                    st.code(json.dumps(step.get("tool_input", {}), ensure_ascii=False, indent=2), language="json")
+                if step.get("observation"):
+                    st.code(step.get("observation", ""), language="text")
+
+        if tool_calls:
+            with st.expander("Tool Calls", expanded=False):
+                for tool_call in tool_calls:
+                    st.markdown(f"**{tool_call.get('name', 'unknown')}**")
+                    if tool_call.get("args"):
+                        st.code(json.dumps(tool_call.get("args", {}), ensure_ascii=False, indent=2), language="json")
+                    if tool_call.get("result") is not None:
+                        st.code(json.dumps(tool_call.get("result"), ensure_ascii=False, indent=2), language="json")
+
+
+def _render_agent_trace(agent_trace: list[dict[str, Any]]) -> None:
+    """Render either grouped agent cycles or the legacy flat trace list."""
+    if not agent_trace:
+        return
+
+    first_item = agent_trace[0]
+    if isinstance(first_item, dict) and "steps" in first_item:
+        with st.expander("🧠 Agent Reasoning Trace", expanded=False):
+            for index, cycle in enumerate(agent_trace, 1):
+                _render_agent_cycle(cycle, index)
+        return
+
+    with st.expander("🔗 Agent Reasoning Trace", expanded=False):
+        for step in agent_trace:
+            st.write(f"**Thought**: {step.get('thought', '')}\n\n**Action**: {step.get('action', '')} (**Tool**: {step.get('tool', 'N/A')})")
+
+
 
 def generate_response(
     user_message: str,
@@ -313,11 +401,33 @@ def generate_response(
                     query=user_message,
                     top_k=top_k_retrieval,
                 )
-                response_data["retrieved_chunks"] = retrieved_chunks
+                response_data["retrieved_chunks"] = [_summarize_retrieved_chunk(chunk) for chunk in retrieved_chunks]
                 logger.info(f"Retrieved {len(retrieved_chunks)} chunks")
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {str(e)}")
                 retrieved_chunks = []
+
+        if multi_agent_enabled:
+            logger.info("Executing multi-agent pipeline")
+            if retrieved_chunks:
+                logger.info(f"Retrieved {len(retrieved_chunks)} chunks for agents")
+
+            agent_output = run_multi_agent_pipeline(
+                user_message,
+                context=retrieved_chunks,
+                llm_client=llm_client,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                max_iterations=5,
+            )
+            response_data["agent_trace"] = agent_output.get("agent_trace", agent_output.get("traces", []))
+            response_data["tool_calls"] = _collect_tool_calls(response_data["agent_trace"])
+            response_data["answer"] = agent_output.get("final_answer", "")
+            if agent_output.get("error_message"):
+                response_data["error"] = agent_output.get("error_message")
+            logger.info(f"Multi-agent response generated: {len(response_data['answer'])} chars")
+            return response_data
 
         if tool_calling_enabled:
             logger.info("Executing ReAct reasoning loop")
@@ -331,24 +441,23 @@ def generate_response(
                 retrieved_context=retrieved_chunks,
             )
             response_data["answer"] = react_output.get("answer", "")
-            response_data["agent_trace"] = _render_react_trace_from_steps(react_output.get("steps", []))
+            response_data["agent_trace"] = [
+                {
+                    "agent_name": "ReAct",
+                    "role": "Tool-Using Analyst",
+                    "input_text": user_message,
+                    "output_text": react_output.get("answer", ""),
+                    "reasoning": "Single-agent ReAct reasoning cycle",
+                    "timestamp": datetime.now().isoformat(),
+                    "mode": react_output.get("mode", "react"),
+                    "steps": react_output.get("steps", []),
+                    "tool_calls": react_output.get("tool_calls", []),
+                    "error": react_output.get("error") or "",
+                }
+            ]
             response_data["tool_calls"] = react_output.get("tool_calls", [])
             response_data["error"] = react_output.get("error")
             logger.info(f"ReAct completed with {len(response_data['tool_calls'])} tool calls")
-            return response_data
-
-        # Handle multi-agent mode
-        if multi_agent_enabled:
-            logger.info("Executing multi-agent pipeline")
-            if retrieved_chunks:
-                logger.info(f"Retrieved {len(retrieved_chunks)} chunks for agents")
-
-            agent_output = run_multi_agent_pipeline(user_message, context=retrieved_chunks)
-            response_data["agent_trace"] = agent_output.get("traces", [])
-            response_data["answer"] = agent_output.get("final_answer", "")
-            if agent_output.get("error_message"):
-                response_data["error"] = agent_output.get("error_message")
-            logger.info(f"Multi-agent response generated: {len(response_data['answer'])} chars")
             return response_data
 
         # Handle standard RAG mode
