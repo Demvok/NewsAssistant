@@ -34,7 +34,7 @@ rag:
 
   chromadb:
     # Distance metric for similarity search (cosine, euclidean, manhattan)
-    distance_metric: "euclidean"
+    distance_metric: "cosine"
     # Number of chunks to retrieve per query
     top_k_retrieval: 10
 

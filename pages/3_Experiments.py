@@ -109,14 +109,15 @@ def run_single_experiment(
             prompt=prompt,
             temperature=temperature,
             top_p=top_p,
-            max_tokens=settings.max_tokens,
+            max_tokens=settings.max_tokens if settings.max_tokens is not None else 1024, # Handle potential None value for max_tokens
         )
         
         return {
             "text": response.text,
             "length": len(response.text),
-            "tokens": int(response.tokens_used) if hasattr(response.tokens_used, 'item') else int(response.tokens_used),
-            "latency_ms": float(response.latency_ms) if hasattr(response.latency_ms, 'item') else float(response.latency_ms),
+            # Safely cast tokens and latency to int/float, defaulting to 0 if None
+            "tokens": int(response.tokens_used) if response.tokens_used is not None else 0,
+            "latency_ms": float(response.latency_ms) if response.latency_ms is not None else 0.0,
             "finish_reason": response.finish_reason,
             "success": True,
             "error": None,
@@ -179,7 +180,7 @@ def run_temperature_experiment(
     
     for temp_idx, temperature in enumerate(temperatures):
         temp_results = {
-            "temperature": temperature,
+            "temperature": float(temperature),
             "runs": [],
         }
         
@@ -319,7 +320,7 @@ def export_experiment_results(
 
 
 # Main layout
-tab1, tab2, tab3 = st.tabs(["🚀 Run Experiment", "📊 Results", "📈 Analysis"])
+tab1, tab2, tab3, tab4 = st.tabs(["🚀 Run Experiment", "📊 Results", "📈 Analysis", "📄 Detailed View"])
 
 
 with tab1:
@@ -432,7 +433,7 @@ with tab1:
                 try:
                     experiment_data = run_temperature_experiment(
                         prompt=prompt,
-                        temperatures=temperatures,
+                        temperatures=[float(t) for t in temperatures],
                         num_runs=num_runs,
                         top_p=top_p,
                         top_k=top_k,
@@ -745,11 +746,10 @@ with tab3:
                         avg_lengths_by_temp[temp] = np.mean(lengths)
                 
                 if avg_lengths_by_temp:
-                    highest_temp = max(avg_lengths_by_temp, key=avg_lengths_by_temp.get)
-                    lowest_temp = min(avg_lengths_by_temp, key=avg_lengths_by_temp.get)
-                    
+                    highest_temp = max(avg_lengths_by_temp, key=lambda k: avg_lengths_by_temp[k])
+                    lowest_temp = min(avg_lengths_by_temp, key=lambda k: avg_lengths_by_temp[k])
+
                     col1, col2 = st.columns(2)
-                    
                     with col1:
                         st.metric(
                             "Longest avg response",
@@ -766,6 +766,84 @@ with tab3:
             else:
                 st.warning("No successful runs to analyze")
 
+with tab4:
+    st.subheader("Detailed Experiment View")
+    
+    if not st.session_state.experiment_results:
+        st.info("No experiments yet. Run one from the 'Run Experiment' tab.")
+    else:
+        # Select experiment for detailed view
+        exp_options = [
+            f"Exp {i+1}: {exp['timestamp'][:19]}"
+            for i, exp in enumerate(st.session_state.experiment_results)
+        ]
+        
+        selected_idx = st.selectbox(
+            "Select experiment for detailed analysis",
+            options=range(len(st.session_state.experiment_results)),
+            format_func=lambda i: exp_options[i],
+            key="detail_select",
+        )
+        
+        if selected_idx is not None:
+            selected_exp = st.session_state.experiment_results[selected_idx]
+            
+            st.markdown(f"### 🧪 Experiment Metadata - {selected_exp['timestamp'][:19]}")
+            col1, col2, col3, col4 = st.columns(4)
 
-if __name__ == "__main__":
+            with col1:
+                st.metric("Prompt Length", len(selected_exp["prompt"]))
+            with col2:
+                st.metric("Total Runs", selected_exp["summary"].get("total_runs", 0))
+            with col3:
+                st.metric("Avg Output Length (Overall)", f"{selected_exp['summary'].get('overall_avg_length', 0):.0f} chars")
+            with col4:
+                st.metric("Success Rate (Overall)", f"{(selected_exp['summary'].get('successful_runs', 0) / selected_exp['summary'].get('total_runs', 1)):.0%}")
+
+            st.markdown("---")
+            
+            # Display overall configuration details
+            st.subheader("Configuration Settings")
+            config_details = {
+                "Prompt": selected_exp["prompt"],
+                "Temperatures Tested": ', '.join(map(str, selected_exp['temperatures'])),
+                "Number of Runs per Temp": selected_exp["num_runs"],
+                "Top-P Value": f"{selected_exp['top_p']}",
+                "Top-K Value": f"{selected_exp['top_k']}"
+            }
+            for k, v in config_details.items():
+                 st.write(f"**{k}:** {v}")
+
+            st.markdown("---")
+
+            # Group and display results by temperature
+            st.subheader("Individual Run Analysis")
+            
+            for temp_result in selected_exp["results"]:
+                temp = temp_result["temperature"]
+                st.markdown(f"#### 🔥 Temperature: {temp:.1f} (Stats: Avg Len={temp_result['stats'].get('avg_length', 0):.0f}, Success Rate={temp_result['stats'].get('success_rate', 0):.0%})")
+                st.markdown("---")
+
+                # Display individual runs for this temperature
+                for run in temp_result["runs"]:
+                    run_status = "✅ SUCCESS" if run["success"] else f"❌ FAILED ({run.get('error', 'Unknown error')[:50]}...)"
+                    st.markdown(f"**Run {run['run_index']} - Status: {run_status}**")
+
+                    if run["success"]:
+                        # Display Run Metadata and Prompt (can be repeated for context)
+                        with st.expander("🔍 View Detailed Run Data"):
+                            st.caption("--- RUN METADATA ---")
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1:
+                                st.metric("Length (Chars)", run["length"])
+                                st.metric("Tokens Used", run["tokens"])
+                            with col_m2:
+                                st.metric("Latency (ms)", f"{run['latency_ms']:.0f}")
+                                st.write("**Finish Reason:**" + run["finish_reason"])
+
+                            st.caption("--- GENERATED OUTPUT ---")
+                            # Display the model output text
+                            st.text(run["text"])
+                    else:
+                        st.warning(f"Run {run['run_index']} failed. Error details available in metadata.")
     pass
