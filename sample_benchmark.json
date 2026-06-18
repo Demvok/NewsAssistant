@@ -1,0 +1,133 @@
+{
+  "test_cases": [
+    {
+      "id": "green_energy_gen_1",
+      "topic": "green_energy",
+      "category": "overview",
+      "assistant_mode": "generation",
+      "prompt": "Summarize the main public debate around green energy in the news corpus.",
+      "expected_answer": "A concise overview of renewable energy transition, policy tradeoffs, costs, and adoption barriers.",
+      "evaluation_criteria": "Answers the question directly, stays general but structured, and avoids unsupported specifics.",
+      "notes": "Baseline generation on the green energy topic."
+    },
+    {
+      "id": "green_energy_rag_1",
+      "topic": "green_energy",
+      "category": "evidence_lookup",
+      "assistant_mode": "rag",
+      "prompt": "What concrete examples of renewable energy adoption appear in the corpus?",
+      "expected_answer": "Mentions examples such as solar, wind, batteries, grid upgrades, or policy-backed clean energy efforts.",
+      "evaluation_criteria": "Uses retrieved context, cites grounded examples, and does not invent unsupported projects.",
+      "notes": "Checks retrieval quality and synthesis."
+    },
+    {
+      "id": "green_energy_react_1",
+      "topic": "green_energy",
+      "category": "tool_usage",
+      "assistant_mode": "react",
+      "prompt": "Count how many times the assistant should look for green energy mentions and explain the result at a high level.",
+      "expected_answer": "A response that uses tools appropriately, explains the count or search outcome, and stays on topic.",
+      "evaluation_criteria": "Actual tool use should be visible, the tool choice should match the request, and the answer should use the tool result.",
+      "notes": "Tool usage benchmark for corpus analysis."
+    },
+    {
+      "id": "green_energy_agent_1",
+      "topic": "green_energy",
+      "category": "synthesis",
+      "assistant_mode": "multi_agent",
+      "prompt": "Give a balanced analysis of green energy progress and remaining concerns.",
+      "expected_answer": "An analysis that includes progress, limitations, and a balanced conclusion.",
+      "evaluation_criteria": "The final answer should reflect analysis, critique, and synthesis with visible trace usefulness.",
+      "notes": "Multi-agent synthesis on the green energy topic."
+    },
+    {
+      "id": "trade_war_gen_1",
+      "topic": "trade_war",
+      "category": "overview",
+      "assistant_mode": "generation",
+      "prompt": "Summarize the public narrative around the U.S. trade war in the corpus.",
+      "expected_answer": "A high-level summary of tariffs, supply-chain pressure, market uncertainty, and policy tension.",
+      "evaluation_criteria": "Direct answer, domain-appropriate tone, and no unsupported detail.",
+      "notes": "Baseline generation on trade policy."
+    },
+    {
+      "id": "trade_war_rag_1",
+      "topic": "trade_war",
+      "category": "evidence_lookup",
+      "assistant_mode": "rag",
+      "prompt": "Which industries or business areas are most affected by trade tensions?",
+      "expected_answer": "References to manufacturing, logistics, consumer goods, agriculture, or similar affected sectors.",
+      "evaluation_criteria": "Should ground the answer in retrieved passages and mention concrete affected sectors if available.",
+      "notes": "Retrieval and summarization benchmark."
+    },
+    {
+      "id": "trade_war_react_1",
+      "topic": "trade_war",
+      "category": "tool_usage",
+      "assistant_mode": "react",
+      "prompt": "Search for a relevant article and explain what it says about tariffs or business impact.",
+      "expected_answer": "A tool-driven answer that identifies the article and summarizes the tariff or business effect.",
+      "evaluation_criteria": "Tool calls should be meaningful and the final answer should clearly use the observed tool output.",
+      "notes": "Tool use on the trade war topic."
+    },
+    {
+      "id": "trade_war_agent_1",
+      "topic": "trade_war",
+      "category": "synthesis",
+      "assistant_mode": "multi_agent",
+      "prompt": "Provide a balanced assessment of trade war winners, losers, and uncertainties.",
+      "expected_answer": "A synthesis with multiple perspectives, uncertainty, and a balanced final judgment.",
+      "evaluation_criteria": "Should show analysis, critique, and synthesis without exaggeration.",
+      "notes": "Multi-agent synthesis on trade policy."
+    },
+    {
+      "id": "censorship_gen_1",
+      "topic": "censorship",
+      "category": "overview",
+      "assistant_mode": "generation",
+      "prompt": "Summarize the main concerns about social network censorship raised in news coverage.",
+      "expected_answer": "A concise overview of moderation, speech, bias, and platform responsibility concerns.",
+      "evaluation_criteria": "Directly answers the prompt and remains broadly applicable.",
+      "notes": "Baseline generation on censorship."
+    },
+    {
+      "id": "censorship_rag_1",
+      "topic": "censorship",
+      "category": "evidence_lookup",
+      "assistant_mode": "rag",
+      "prompt": "What kinds of moderation or misinformation responses are described in the corpus?",
+      "expected_answer": "Mentions fact-checking, moderation policies, verification systems, or takedown approaches.",
+      "evaluation_criteria": "Retrieves and synthesizes corpus evidence rather than giving a generic answer.",
+      "notes": "RAG benchmark on content moderation."
+    },
+    {
+      "id": "censorship_react_1",
+      "topic": "censorship",
+      "category": "tool_usage",
+      "assistant_mode": "react",
+      "prompt": "Use a tool to inspect corpus references related to censorship and explain the key takeaway.",
+      "expected_answer": "A tool-based explanation with a clear takeaway about censorship or moderation.",
+      "evaluation_criteria": "Tool usage must be observable and relevant, not decorative.",
+      "notes": "ReAct benchmark on censorship."
+    },
+    {
+      "id": "censorship_agent_1",
+      "topic": "censorship",
+      "category": "synthesis",
+      "assistant_mode": "multi_agent",
+      "prompt": "Give a balanced analysis of free speech concerns and moderation concerns on social platforms.",
+      "expected_answer": "A nuanced answer that balances competing concerns and avoids one-sided framing.",
+      "evaluation_criteria": "The final answer should reflect critique and synthesis, not just a first-pass summary.",
+      "notes": "Multi-agent synthesis on censorship."
+    }
+  ],
+  "metadata": {
+    "created_at": "2026-06-18T00:00:00Z",
+    "version": "2.0",
+    "description": "Mode-aware benchmark dataset for the AI News Intelligence Assistant covering generation, RAG, ReAct, and multi-agent flows across the three main topics.",
+    "total_tests": 12,
+    "topics": ["green_energy", "trade_war", "censorship"],
+    "categories": ["overview", "evidence_lookup", "tool_usage", "synthesis"],
+    "modes": ["generation", "rag", "react", "multi_agent"]
+  }
+}

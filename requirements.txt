@@ -3,14 +3,12 @@
 
 # Web Framework & UI
 streamlit
-streamlit-option-menu
+click
 
 # LLM & Embeddings
 openai
-langchain
 langchain-community
 langchain-core
-langchain-openai
 langgraph
 
 # Vector Database
@@ -18,13 +16,11 @@ chromadb
 
 # Document Processing
 pypdf
-python-docx
 
 # Data & Processing
 pandas
 numpy
 pydantic
-pydantic-settings
 
 # Configuration
 python-dotenv
@@ -33,13 +29,6 @@ pyyaml
 # Database
 sqlalchemy
 pymysql
-
-# Utilities
-requests
-aiohttp
-
-# Logging & Monitoring
-python-json-logger
 
 # Optional: For plotting and visualization
 plotly
